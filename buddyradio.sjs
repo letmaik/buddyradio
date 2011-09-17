@@ -1,3 +1,3 @@
-function start() {
+exports.start = function() {
 	alert("hello world");
 }
