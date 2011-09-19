@@ -35,12 +35,14 @@ function coffeeLoaded(err, module) {
 # START
 	
 exports.start = () ->
-	alert("a")
+	controller = new Controller.Radio([new Model.LastFmBuddyNetwork], [new Model.GroovesharkStreamingNetwork])
+	controller.start()
 
 http = require("apollo:http")
 LastFmApi = require("apollo:lastfm");
 LastFmApi.key = "53cda3b9d8760dbded7b4ca420b5abb2"
-require("apollo:jquery-binding").install()
+# not sure if jquery-binding needed at all
+# require("apollo:jquery-binding").install()
 	
 Model = {}
 	
@@ -55,7 +57,7 @@ class Model.GroovesharkSongRessource extends Model.SongRessource
 		
 class Model.Song
 	constructor: (@artist, @title, @listenedAt) -> # unix timestamp | null if current song
-	ressources: []
+	ressources: null # null = not searched yet; [] = no ressources found
 	
 class Model.Buddy
 	constructor: (@network, @username, @avatarUrl, @profileUrl) ->
@@ -156,11 +158,48 @@ class Model.Radio
 	playedSongs: []  
 	isAlternativeSong: false
 	noSongFound: false
+
+View = {}
 	
+class View.BuddySidebarSection
+	constructor: (@radio) ->
+	
+	init: () ->
+		$("#sidebar .container_inner").append("""
+		<div id="sidebar_buddyradio_wrapper" class="listWrapper">
+            <div class="divider" style="display: block;">
+                <span class="sidebarHeading">Buddy Radio</span>
+                <a class="sidebarNew"><span>Add Buddy</span></a>
+            </div>
+            <ul id="sidebar_buddyradio" class="link_group">
+				<li title="Test" rel="122" class="sidebar_buddy buddy sidebar_link"> 
+					<a href="">
+						<span class="icon remove"></span>
+						<span class="icon"></span>
+						<span class="label ellipsis">Test</span>
+					</a>
+				</li>
+			</ul>
+        </div>
+		""")
+	refresh: () ->
+		# do a complete refresh based on model data
+
 Controller = {}
 
 class Controller.Radio
-	model = new Model.Radio([new Model.LastFmBuddyNetwork], [new Model.GroovesharkStreamingNetwork])
+	constructor: (@buddyNetworks, @streamingNetworks) ->
+	radio: new Model.Radio(@buddyNetworks, @streamingNetworks)
+	view: new View.BuddySidebarSection(@radio)
+	
+	start: () ->
+		@view.init() # loading buddies...
+		@radio.buddyManager.loadLocal()
+		@view.refresh()
+		# start routine....
+		
+		#sidebar.container div.container_inner_wrapper div.container_inner
+
 	
 # END
 	
@@ -173,7 +212,7 @@ class Controller.Radio
 }
 
 function radioLoaded(err, module) {
-	if (err) throw ('error: ' + err);
+	if (err) alert(err); //throw new Error('error: ' + err);
 	module.start();
 }
 
