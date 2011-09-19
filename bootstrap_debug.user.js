@@ -131,7 +131,7 @@ class Model.StreamingNetwork
 		
 class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 	findSongRessource: (artist, title) ->
-		url = http.constructURL("http://tinysong.com/b/#{artist} #{title}", {format: "json", key: "92565fa4e23f6500b0616a9df0894a6b"})
+		url = http.constructURL("http://buddyradioproxy.appspot.com/tinysong/#{artist} #{title}")
 		response = http.json(url)
 		if response.SongID?
 			new Model.GroovesharkSongRessource(response.SongID)
