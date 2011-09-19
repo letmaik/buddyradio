@@ -37,55 +37,119 @@ function coffeeLoaded(err, module) {
 exports.start = () ->
 	alert("a")
 
+http = require("apollo:http")
+LastFmApi = require("apollo:lastfm");
+LastFmApi.key = "53cda3b9d8760dbded7b4ca420b5abb2"
+require("apollo:jquery-binding").install()
+	
 Model = {}
 	
 class Model.SongRessource
 	play: -> throw new Error("must be overriden")
+	length: null    # song length in seconds | null if unknown (yet)
 	
 class Model.GroovesharkSongRessource extends Model.SongRessource
-	constructor(@songId) ->
-	play: -> # todo
+	constructor: (@songId) ->
+	play: () -> 
+		Grooveshark.addSongsByID([@songID])
 		
 class Model.Song
-	constructor(@artist, @title, @listenedAt) -> # unix timestamp
-	length: null    # song length in seconds
-	ressources: []	
+	constructor: (@artist, @title, @listenedAt) -> # unix timestamp | null if current song
+	ressources: []
 	
 class Model.Buddy
-	constructor: (@username, @listeningStatus) ->
+	constructor: (@network, @username, @avatarUrl, @profileUrl) ->
 	
+	listeningStatus: "off" # live | off | disabled
 	currentSong: null
-	pastSongs: []    
+	pastSongs: []
 	
-	refreshListeningData: -> throw new Error("must be overriden")
-
-class Model.LastFmBuddy extends Model.Buddy
 	refreshListeningData: ->
-		listeningStatus = "live"
-		#currentSong = 
-		#pastSongs..
-	
-	
-class Model.BuddyRessource
-	name: "Buddy Ressource Name" # used in links etc.
+		data = @network.loadListeningData(@username)
+		@listeningStatus = data.listeningStatus
+		@currentSong = data.currentSong
+		@pastSongs = data.pastSongs
+
+class Model.BuddyNetwork
+	name: "Network Name" # used in links etc.
 	loadBuddy: (buddyId) -> throw new Error("must be overriden")
+	loadListeningData: (buddyId) -> throw new Error("must be overriden")
 	
-class Model.LastFmBuddyRessource extends Model.BuddyRessource
+class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	name: "Last.fm"
+	className: "Model.LastFmBuddyNetwork"
+	
 	loadBuddy: (username) ->
-		# do stuff & return LastFmBuddy object
+		user = LastFmApi.get({ method: "user.getInfo", user: username}).user
+		buddy = new Model.Buddy(this, user.name, user.image[0]["#text"], user.url)
+		buddy.refreshListeningData()
+		buddy
+	
+	loadListeningData: (username) ->
+		response = LastFmApi.get({method: "user.getRecentTracks", user: username})
+		if response.error?
+			{listeningStatus: "disabled", currentSong: null, pastSongs: []}
+		else
+			tracks = response.track
+			currentSong = 
+				new Model.Song(
+					track.artist["#text"],
+					track.name
+				) for track in tracks when track["@attr"]?.nowplaying	
+			pastSongs = (
+				new Model.Song(
+					track.artist["#text"],
+					track.name,
+					track.date.uts
+				) for track in tracks when not track["@attr"]?.nowplaying)
+			listeningStatus = if currentSong? then "live" else "off"
+			{listeningStatus, currentSong, pastSongs}
 		
 class Model.BuddyManager
+	constructor: (@buddyNetworks) ->
 	buddies: []
+	storageKey: "buddyRadio_Buddies"
+	
 	refreshListeningData: () ->
-		buddy.refreshListeningData() for buddy in buddies
-		null
+		buddy.refreshListeningData() for buddy in @buddies
+		
+	saveLocal: () -> 
+		reducedBuddies = ([buddy.network.classname, buddy.username] for buddy in @buddies)
+		localStorage[@storageKey] = JSON.stringify(reducedBuddies)
+		
+	loadLocal: () ->
+		reducedBuddies = localStorage[@storageKey] or []
+		@buddies = _findBuddyNetwork(reducedBuddy[0]).loadBuddy(reducedBuddy[1]) for reducedBuddy in reducedBuddies
+		
+	_findBuddyNetwork: (networkClassName) ->
+		network for network in @buddyNetworks when network.className == networkClassName
+
+class Model.StreamingNetwork
+	findSongRessource: (artist, title) -> throw new Error("must be overriden")
+		
+class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
+	findSongRessource: (artist, title) ->
+		url = http.constructURL("http://tinysong.com/b/#{artist} #{title}", {format: "json", key: "92565fa4e23f6500b0616a9df0894a6b"})
+		response = http.json(url)
+		if response.SongID?
+			new Model.GroovesharkSongRessource(response.SongID)
+		else
+			null
+		
+class Model.StreamingManager
+	constructor: (@streamingNetworks) ->
+	
+	findAndAddSongRessources: (song) ->
+		ressources = (network.findSongRessource(song.artist, song.title) for network in @streamingNetworks)
+		song.ressources = (ressource for ressource in ressources when ressource?)
+		song.ressources.length > 0
 	
 class Model.Radio
-	constructor: (@buddyRessources) ->
+	constructor: (@buddyNetworks, @streamingNetworks) ->
 	
-	buddyManager: new Model.BuddyManager
-	onairBuddy: null  
+	buddyManager: new Model.BuddyManager(@buddyNetworks)
+	streamingManager: new Model.StreamingManager(@streamingNetworks)
+	onairBuddy: null	
 	playingSong: null 
 	playingPosition: null # playing position in seconds
 	queuedSongs: []   
@@ -93,6 +157,10 @@ class Model.Radio
 	isAlternativeSong: false
 	noSongFound: false
 	
+Controller = {}
+
+class Controller.Radio
+	model = new Model.Radio([new Model.LastFmBuddyNetwork], [new Model.GroovesharkStreamingNetwork])
 	
 # END
 	
