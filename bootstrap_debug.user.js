@@ -126,7 +126,7 @@ class Model.BuddyManager
 	buddies: []
 	storageKey: "buddyRadio_Buddies"
 	
-	addUser: (buddyNetworkClassName, username) ->
+	addBuddy: (buddyNetworkClassName, username) ->
 		# TODO check if already added
 		console.log("adding #{buddyNetworkClassName} user #{username}")
 		buddy = @_findBuddyNetwork(buddyNetworkClassName).loadBuddy(username)
@@ -137,8 +137,8 @@ class Model.BuddyManager
 		else
 			console.log("user #{username} not found")
 			
-	removeUser: (buddyNetworkClassName, username) ->
-		# TODO
+	removeBuddy: (buddyNetworkClassName, username) ->
+		@buddies = (buddy for buddy in @buddies when not (buddy.network.className == buddyNetworkClassName and buddy.username == username))
 		@saveLocal()
 			
 	refreshListeningData: () ->
@@ -221,7 +221,7 @@ class View.BuddySidebarSection
 						</div>
 					</div>
 					<button id="buddyradio_adduserbutton" type="button" class="btn_style1" style="margin: 4px 0 0 5px">
-						<span >Add Last.fm User</span>
+						<span>Add Last.fm Buddy</span>
 					</button>
 					
 				</div>
@@ -229,22 +229,41 @@ class View.BuddySidebarSection
 			""")
 			$("#buddyradio_newuser").focus()
 			$("#buddyradio_adduserbutton").click(() =>
-				@controller.addLastFmUser($("#buddyradio_newuser")[0].value)
+				@controller.addLastFmBuddy($("#buddyradio_newuser")[0].value)
 				$("#buddyradio_newuserform").remove()
+			)
+			# TODO don't know how to remove duplicate code
+			$("#buddyradio_newuser").keydown((event) =>
+				if event.which == 13
+					@controller.addLastFmBuddy($("#buddyradio_newuser")[0].value)
+					$("#buddyradio_newuserform").remove()
 			)
 		)
 	refresh: () ->
 		console.log("refreshing view")
 		$("#sidebar_buddyradio").empty()
-		$("#sidebar_buddyradio").append("""		
-			<li title="#{buddy.username} (#{buddy.network.name})" rel="#{buddy.network.name}.#{buddy.username}" class="sidebar_buddy buddy sidebar_link"> 
-				<a href="">
-					<span class="icon remove"></span>
-					<span class="icon"></span>
-					<span class="label ellipsis">#{buddy.username}</span>
-				</a>
-			</li>
-		""") for buddy in @radio.buddyManager.buddies
+		(
+			status = buddy.listeningStatus.toUpperCase()
+			if status == "LIVE"
+				status += ", listening to: #{buddy.currentSong.artist} - #{buddy.currentSong.title}"
+			else if status == "OFF" and buddy.pastSongs.length > 0
+				status += ", last listened to: #{buddy.pastSongs[0].artist} - #{buddy.pastSongs[0].title}"
+			$("#sidebar_buddyradio").append("""
+				<li title="#{buddy.username} (#{buddy.network.name}) - #{status}" rel="#{buddy.network.className}-#{buddy.username}" class="sidebar_buddy buddy sidebar_station station sidebar_link"> 
+					<a href="">
+						<span class="icon remove"></span>
+						<span class="icon"></span>
+						<span class="label ellipsis">#{buddy.username}</span>
+					</a>
+				</li>
+			""")
+		) for buddy in @radio.buddyManager.buddies
+		$("li.sidebar_buddy .remove").click((event) =>
+			event.preventDefault()
+			entry = $(event.currentTarget).parent().parent()
+			[networkClassName, username] = entry.attr("rel").split("-")
+			@controller.removeBuddy(networkClassName, username)
+		)
 		console.log("view refreshed")
 
 Controller = {}
@@ -260,8 +279,12 @@ class Controller.Radio
 		@view.refresh()
 		# start routine....
 		
-	addLastFmUser: (username) ->
-		@radio.buddyManager.addUser("Model.LastFmBuddyNetwork", username)
+	addLastFmBuddy: (username) ->
+		@radio.buddyManager.addBuddy("Model.LastFmBuddyNetwork", username)
+		@view.refresh()
+		
+	removeBuddy: (networkClassName, username) ->
+		@radio.buddyManager.removeBuddy(networkClassName, username)
 		@view.refresh()
 	
 # END
