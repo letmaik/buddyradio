@@ -82,36 +82,59 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	className: "Model.LastFmBuddyNetwork"
 	
 	loadBuddy: (username) ->
-		user = LastFmApi.get({ method: "user.getInfo", user: username}).user
+		user = null
+		try
+			console.log("querying lastfm...")
+			user = LastFmApi.get({ method: "user.getInfo", user: username})
+			console.log("lastfm queried")
+		catch e
+			console.log(e)
+			return
+		console.log(user)
 		buddy = new Model.Buddy(this, user.name, user.image[0]["#text"], user.url)
 		buddy.refreshListeningData()
 		buddy
 	
 	loadListeningData: (username) ->
-		response = LastFmApi.get({method: "user.getRecentTracks", user: username})
-		if response.error?
-			{listeningStatus: "disabled", currentSong: null, pastSongs: []}
-		else
-			tracks = response.track
-			currentSong = 
-				new Model.Song(
-					track.artist["#text"],
-					track.name
-				) for track in tracks when track["@attr"]?.nowplaying	
-			pastSongs = (
-				new Model.Song(
-					track.artist["#text"],
-					track.name,
-					track.date.uts
-				) for track in tracks when not track["@attr"]?.nowplaying)
-			listeningStatus = if currentSong? then "live" else "off"
-			{listeningStatus, currentSong, pastSongs}
+		console.log("getting recent tracks from lastfm")
+		response = null
+		try 
+			response = LastFmApi.get({method: "user.getRecentTracks", user: username})
+		catch e
+			if e.code == 4
+				return {listeningStatus: "disabled", currentSong: null, pastSongs: []}
+			else
+				throw e
+		tracks = response.track
+		currentSong = (
+			new Model.Song(
+				track.artist["#text"],
+				track.name
+			) for track in tracks when track["@attr"]?.nowplaying)[0]
+		pastSongs = (
+			new Model.Song(
+				track.artist["#text"],
+				track.name,
+				track.date.uts
+			) for track in tracks when not track["@attr"]?.nowplaying)
+		listeningStatus = if currentSong? then "live" else "off"
+		{listeningStatus, currentSong, pastSongs}
 		
 class Model.BuddyManager
 	constructor: (@buddyNetworks) ->
 	buddies: []
 	storageKey: "buddyRadio_Buddies"
 	
+	addUser: (buddyNetworkClassName, username) ->
+		# TODO check if already added
+		console.log("adding #{buddyNetworkClassName} user #{username}")
+		buddy = @_findBuddyNetwork(buddyNetworkClassName).loadBuddy(username)
+		if buddy?
+			@buddies.push(buddy)
+			console.log("user #{username} added")
+		else
+			console.log("user #{username} not found")
+			
 	refreshListeningData: () ->
 		buddy.refreshListeningData() for buddy in @buddies
 		
@@ -121,10 +144,10 @@ class Model.BuddyManager
 		
 	loadLocal: () ->
 		reducedBuddies = localStorage[@storageKey] or []
-		@buddies = _findBuddyNetwork(reducedBuddy[0]).loadBuddy(reducedBuddy[1]) for reducedBuddy in reducedBuddies
+		@buddies = (@_findBuddyNetwork(reducedBuddy[0]).loadBuddy(reducedBuddy[1]) for reducedBuddy in reducedBuddies)
 		
 	_findBuddyNetwork: (networkClassName) ->
-		network for network in @buddyNetworks when network.className == networkClassName
+		(network for network in @buddyNetworks when network.className == networkClassName)[0]
 
 class Model.StreamingNetwork
 	findSongRessource: (artist, title) -> throw new Error("must be overriden")
@@ -147,10 +170,10 @@ class Model.StreamingManager
 		song.ressources.length > 0
 	
 class Model.Radio
-	constructor: (@buddyNetworks, @streamingNetworks) ->
-	
-	buddyManager: new Model.BuddyManager(@buddyNetworks)
-	streamingManager: new Model.StreamingManager(@streamingNetworks)
+	constructor: (@buddyNetworks, @streamingNetworks) ->	
+		@buddyManager = new Model.BuddyManager(@buddyNetworks)
+		@streamingManager = new Model.StreamingManager(@streamingNetworks)
+		
 	onairBuddy: null	
 	playingSong: null 
 	playingPosition: null # playing position in seconds
@@ -162,7 +185,7 @@ class Model.Radio
 View = {}
 	
 class View.BuddySidebarSection
-	constructor: (@radio) ->
+	constructor: (@radio, @controller) ->
 	
 	init: () ->
 		$("#sidebar .container_inner").append("""
@@ -172,25 +195,58 @@ class View.BuddySidebarSection
                 <a class="sidebarNew"><span>Add Buddy</span></a>
             </div>
             <ul id="sidebar_buddyradio" class="link_group">
-				<li title="Test" rel="122" class="sidebar_buddy buddy sidebar_link"> 
-					<a href="">
-						<span class="icon remove"></span>
-						<span class="icon"></span>
-						<span class="label ellipsis">Test</span>
-					</a>
-				</li>
+
 			</ul>
         </div>
 		""")
+		newButton = $("#sidebar_buddyradio_wrapper .sidebarNew")
+		position = newButton.offset()
+		newButton.click( () =>
+			if $("#buddyradio_newuserform").length == 1
+				$("#buddyradio_newuserform").remove()
+				return
+
+			$("body").append("""
+			<div id="buddyradio_newuserform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 220px; height:40px" class="jjmenu sidebarmenu jjsidebarMenuNew bottomOriented">
+				<div class="jj_menu_item">
+					<div style="width: 100px;float:left" class="input_wrapper">
+						<div class="cap">
+							<input type="text" id="buddyradio_newuser" name="buddy"> 
+						</div>
+					</div>
+					<button id="buddyradio_adduserbutton" type="button" class="btn_style1" style="margin: 4px 0 0 5px">
+						<span >Add Last.fm User</span>
+					</button>
+					
+				</div>
+			</div>
+			""")
+			$("#buddyradio_newuser").focus()
+			$("#buddyradio_adduserbutton").click(() =>
+				@controller.addLastFmUser($("#buddyradio_newuser")[0].value)
+				$("#buddyradio_newuserform").remove()
+			)
+		)
 	refresh: () ->
-		# do a complete refresh based on model data
+		console.log("refreshing view")
+		$("#sidebar_buddyradio").empty()
+		$("#sidebar_buddyradio").append("""		
+			<li title="#{buddy.username} (#{buddy.network.name})" rel="#{buddy.network.name}.#{buddy.username}" class="sidebar_buddy buddy sidebar_link"> 
+				<a href="">
+					<span class="icon remove"></span>
+					<span class="icon"></span>
+					<span class="label ellipsis">#{buddy.username}</span>
+				</a>
+			</li>
+		""") for buddy in @radio.buddyManager.buddies
+		console.log("view refreshed")
 
 Controller = {}
 
 class Controller.Radio
 	constructor: (@buddyNetworks, @streamingNetworks) ->
-	radio: new Model.Radio(@buddyNetworks, @streamingNetworks)
-	view: new View.BuddySidebarSection(@radio)
+		@radio = new Model.Radio(@buddyNetworks, @streamingNetworks)
+		@view = new View.BuddySidebarSection(@radio, @)
 	
 	start: () ->
 		@view.init() # loading buddies...
@@ -198,8 +254,9 @@ class Controller.Radio
 		@view.refresh()
 		# start routine....
 		
-		#sidebar.container div.container_inner_wrapper div.container_inner
-
+	addLastFmUser: (username) ->
+		@radio.buddyManager.addUser("Model.LastFmBuddyNetwork", username)
+		@view.refresh()
 	
 # END
 	
