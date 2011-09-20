@@ -105,7 +105,7 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 				return {listeningStatus: "disabled", currentSong: null, pastSongs: []}
 			else
 				throw e
-		tracks = response.track
+		tracks = response.track or []
 		currentSong = (
 			new Model.Song(
 				track.artist["#text"],
@@ -117,6 +117,7 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 				track.name,
 				track.date.uts
 			) for track in tracks when not track["@attr"]?.nowplaying)
+		console.log(pastSongs)
 		listeningStatus = if currentSong? then "live" else "off"
 		{listeningStatus, currentSong, pastSongs}
 		
@@ -131,19 +132,24 @@ class Model.BuddyManager
 		buddy = @_findBuddyNetwork(buddyNetworkClassName).loadBuddy(username)
 		if buddy?
 			@buddies.push(buddy)
+			@saveLocal()
 			console.log("user #{username} added")
 		else
 			console.log("user #{username} not found")
+			
+	removeUser: (buddyNetworkClassName, username) ->
+		# TODO
+		@saveLocal()
 			
 	refreshListeningData: () ->
 		buddy.refreshListeningData() for buddy in @buddies
 		
 	saveLocal: () -> 
-		reducedBuddies = ([buddy.network.classname, buddy.username] for buddy in @buddies)
+		reducedBuddies = ([buddy.network.className, buddy.username] for buddy in @buddies)
 		localStorage[@storageKey] = JSON.stringify(reducedBuddies)
 		
 	loadLocal: () ->
-		reducedBuddies = localStorage[@storageKey] or []
+		reducedBuddies = JSON.parse(localStorage[@storageKey] or "[]")
 		@buddies = (@_findBuddyNetwork(reducedBuddy[0]).loadBuddy(reducedBuddy[1]) for reducedBuddy in reducedBuddies)
 		
 	_findBuddyNetwork: (networkClassName) ->
