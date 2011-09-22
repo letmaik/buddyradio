@@ -29,7 +29,7 @@ function loadCoffee() {
 
 function coffeeLoaded(err, module) {
 	if (err) throw ('error: ' + err);
-
+	
 	var debugMultiLineHack = (<><![CDATA[
 
 # START
@@ -41,32 +41,27 @@ exports.start = () ->
 http = require("apollo:http")
 LastFmApi = require("apollo:lastfm");
 LastFmApi.key = "53cda3b9d8760dbded7b4ca420b5abb2"
-# not sure if jquery-binding needed at all
-# require("apollo:jquery-binding").install()
 	
 Model = {}
 	
 class Model.SongRessource
-	play: -> throw new Error("must be overriden")
-	length: null    # song length in seconds | null if unknown (yet)
+	constructor: () ->
+		@length = null # song length in seconds | null if unknown (yet)
 	
 class Model.GroovesharkSongRessource extends Model.SongRessource
 	constructor: (@songId) ->
-	play: () -> 
-		Grooveshark.addSongsByID([@songID])
 		
 class Model.Song
 	constructor: (@artist, @title, @listenedAt) -> # unix timestamp | null if current song
-	ressources: null # null = not searched yet; [] = no ressources found
+		@ressources = null # null = not searched yet; [] = no ressources found
 	
 class Model.Buddy
 	constructor: (@network, @username, @avatarUrl, @profileUrl) ->
+		@listeningStatus = "off" # live | off | disabled
+		@currentSong = null
+		@pastSongs = []
 	
-	listeningStatus: "off" # live | off | disabled
-	currentSong: null
-	pastSongs: []
-	
-	refreshListeningData: ->
+	refreshListeningData: () ->
 		data = @network.loadListeningData(@username)
 		@listeningStatus = data.listeningStatus
 		@currentSong = data.currentSong
@@ -74,6 +69,7 @@ class Model.Buddy
 
 class Model.BuddyNetwork
 	name: "Network Name" # used in links etc.
+	className: "Model.XYZBuddyNetwork"
 	loadBuddy: (buddyId) -> throw new Error("must be overriden")
 	loadListeningData: (buddyId) -> throw new Error("must be overriden")
 	
@@ -84,13 +80,10 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	loadBuddy: (username) ->
 		user = null
 		try
-			console.log("querying lastfm...")
 			user = LastFmApi.get({ method: "user.getInfo", user: username})
-			console.log("lastfm queried")
 		catch e
 			console.log(e)
 			return
-		console.log(user)
 		buddy = new Model.Buddy(this, user.name, user.image[0]["#text"], user.url)
 		buddy.refreshListeningData()
 		buddy
@@ -117,7 +110,6 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 				track.name,
 				track.date.uts
 			) for track in tracks when not track["@attr"]?.nowplaying)
-		console.log(pastSongs)
 		listeningStatus = if currentSong? then "live" else "off"
 		{listeningStatus, currentSong, pastSongs}
 		
@@ -125,9 +117,15 @@ class Model.BuddyManager
 	constructor: (@buddyNetworks) ->
 	buddies: []
 	storageKey: "buddyRadio_Buddies"
+	eventListeners: []
+	
+	getBuddy: (buddyNetworkClassName, username) ->
+		@buddies.filter((buddy) -> buddy.network.className == buddyNetworkClassName and buddy.username == username)[0]
 	
 	addBuddy: (buddyNetworkClassName, username) ->
-		# TODO check if already added
+		if @buddies.some((buddy) -> buddy.network.className == buddyNetworkClassName and buddy.username == username)
+			console.log("user #{username} is already added")
+			return
 		console.log("adding #{buddyNetworkClassName} user #{username}")
 		buddy = @_findBuddyNetwork(buddyNetworkClassName).loadBuddy(username)
 		if buddy?
@@ -137,9 +135,10 @@ class Model.BuddyManager
 		else
 			console.log("user #{username} not found")
 			
-	removeBuddy: (buddyNetworkClassName, username) ->
-		@buddies = (buddy for buddy in @buddies when not (buddy.network.className == buddyNetworkClassName and buddy.username == username))
+	removeBuddy: (buddyToBeRemoved) ->
+		@buddies = @buddies.filter((buddy) -> buddy != buddyToBeRemoved)
 		@saveLocal()
+		listener("Model.BuddyManager:BuddyRemoved", buddyToBeRemoved) for listener in @eventListeners
 			
 	refreshListeningData: () ->
 		buddy.refreshListeningData() for buddy in @buddies
@@ -151,14 +150,33 @@ class Model.BuddyManager
 	loadLocal: () ->
 		reducedBuddies = JSON.parse(localStorage[@storageKey] or "[]")
 		@buddies = (@_findBuddyNetwork(reducedBuddy[0]).loadBuddy(reducedBuddy[1]) for reducedBuddy in reducedBuddies)
+	
+	registerListener: (listener) ->
+		@eventListeners.push(listener)
 		
 	_findBuddyNetwork: (networkClassName) ->
-		(network for network in @buddyNetworks when network.className == networkClassName)[0]
+		@buddyNetworks.filter((network) -> network.className == networkClassName)[0]
 
 class Model.StreamingNetwork
+	constructor: () ->
+		@eventListeners = []
+		
+	registerListener: (listener) ->
+		@eventListeners.push(listener)
+		
 	findSongRessource: (artist, title) -> throw new Error("must be overriden")
+	canPlay: (songRessource) -> throw new Error("must be overriden") # true if this network can handle the specific ressource
+	play: (songRessource) -> throw new Error("must be overriden")
+	stop: () -> throw new Error("must be overriden")
+	# declare "enqueue: (songRessource) ->" in subclass if network supports enqueueing
 		
 class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
+	constructor: () ->
+		super()
+		if not (Grooveshark.addSongsByID? and Grooveshark.setSongStatusCallback? and Grooveshark.pause? and Grooveshark.removeCurrentSongFromQueue?)
+			throw new Error("Grooveshark API not available or has changed")
+		Grooveshark.setSongStatusCallback(@.handleGroovesharkEvent)
+
 	findSongRessource: (artist, title) ->
 		url = http.constructURL("http://buddyradioproxy.appspot.com/tinysong/#{artist} #{title}")
 		response = http.json(url)
@@ -166,27 +184,94 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			new Model.GroovesharkSongRessource(response.SongID)
 		else
 			null
+	
+	canPlay: (songRessource) ->
+		songRessource instanceof Model.GroovesharkSongRessource
+			
+	queuedSongIDs: []
+			
+	play: (songRessource) ->
+		console.log("playing... Grooveshark songID #{songRessource.songId}")
+		Grooveshark.addSongsByID([songRessource.songId])
+		hold(5000) # TODO do via callback
+		# skip songs which are in the queue 
+		# FIXME not reliable, goes into infinite loop very often
+		#while Grooveshark.getCurrentSongStatus().song.songID != songRessource.songId
+		#	Grooveshark.next()
+		if Grooveshark.getCurrentSongStatus().status == "paused" or Grooveshark.getCurrentSongStatus().status == "none" 
+			Grooveshark.play()
+		@queuedSongIDs.push(songRessource.songId)
+		
+	enqueue: (songRessource) ->
+		Grooveshark.addSongsByID([songRessource.songId])
+		if Grooveshark.getCurrentSongStatus().status == "paused" or Grooveshark.getCurrentSongStatus().status == "none" 
+			Grooveshark.play()
+		@queuedSongIDs.push(songRessource.songId)
+
+	stop: () ->
+		Grooveshark.pause()
+		@queuedSongRessources = []
+		# useful? Grooveshark.removeCurrentSongFromQueue()
+		
+	handleGroovesharkEvent: (data) ->
+		status = data.status # one of: "none", "loading", "playing", "paused", "buffering", "failed", "completed"
+		song = data.song # can be null; useful: .songID, .estimateDuration, .calculatedDuration, .position
+		if status == "completed" and @queuedSongIDs.indexOf(song.songID) != -1
+			@eventListeners("Model.StreamingNetwork:StreamingCompleted")
 		
 class Model.StreamingManager
 	constructor: (@streamingNetworks) ->
+		network.registerListener(@.handleEvent) for network in @streamingNetworks
 	
 	findAndAddSongRessources: (song) ->
 		ressources = (network.findSongRessource(song.artist, song.title) for network in @streamingNetworks)
-		song.ressources = (ressource for ressource in ressources when ressource?)
+		song.ressources = ressources.filter((ressource) -> ressource?)
 		song.ressources.length > 0
-	
-class Model.Radio
-	constructor: (@buddyNetworks, @streamingNetworks) ->	
-		@buddyManager = new Model.BuddyManager(@buddyNetworks)
-		@streamingManager = new Model.StreamingManager(@streamingNetworks)
 		
-	onairBuddy: null	
+	stopStreaming: () ->
+		network.stop() for network in @streamingNetworks
+		
+	startStreamingFor: (buddy) ->
+		buddy.refreshListeningData()
+		if buddy.currentSong? and @findAndAddSongRessources(buddy.currentSong)
+			console.log("starting streaming for #{buddy.username}")
+			firstRessource = buddy.currentSong.ressources[0]
+			network = @streamingNetworks.filter((network) -> network.canPlay(firstRessource))[0]
+			network.play(firstRessource)
+			# todo
+		
+		
 	playingSong: null 
 	playingPosition: null # playing position in seconds
 	queuedSongs: []   
 	playedSongs: []  
 	isAlternativeSong: false
 	noSongFound: false
+		
+	handleEvent: (name, data) ->
+		# todo
+	
+class Model.Radio
+	constructor: (@buddyNetworks, @streamingNetworks) ->	
+		@buddyManager = new Model.BuddyManager(@buddyNetworks)
+		@buddyManager.registerListener(@.handleEvent)
+		@streamingManager = new Model.StreamingManager(@streamingNetworks)
+	
+	onAirBuddy: null
+	
+	tune: (buddy) ->
+		@tuneOut()
+		if @streamingManager.startStreamingFor(buddy)
+			@onAirBuddy = buddy
+	
+	tuneOut: () ->
+		@onAirBuddy = null
+		@streamingManager.stopStreaming()
+	
+	handleEvent: (name, data) ->
+		if name == "Model.BuddyManager:BuddyRemoved"
+			if @onAirBuddy == data
+				@tuneOut()
 
 View = {}
 	
@@ -201,7 +286,9 @@ class View.BuddySidebarSection
                 <a class="sidebarNew"><span>Add Buddy</span></a>
             </div>
             <ul id="sidebar_buddyradio" class="link_group">
-
+				<li> 
+					<span class="label ellipsis">loading...</span>
+				</li>
 			</ul>
         </div>
 		""")
@@ -232,7 +319,6 @@ class View.BuddySidebarSection
 				@controller.addLastFmBuddy($("#buddyradio_newuser")[0].value)
 				$("#buddyradio_newuserform").remove()
 			)
-			# TODO don't know how to remove duplicate code
 			$("#buddyradio_newuser").keydown((event) =>
 				if event.which == 13
 					@controller.addLastFmBuddy($("#buddyradio_newuser")[0].value)
@@ -249,7 +335,7 @@ class View.BuddySidebarSection
 			else if status == "OFF" and buddy.pastSongs.length > 0
 				status += ", last listened to: #{buddy.pastSongs[0].artist} - #{buddy.pastSongs[0].title}"
 			$("#sidebar_buddyradio").append("""
-				<li title="#{buddy.username} (#{buddy.network.name}) - #{status}" rel="#{buddy.network.className}-#{buddy.username}" class="sidebar_buddy buddy sidebar_station station sidebar_link"> 
+				<li title="#{buddy.username} (#{buddy.network.name}) - #{status}" rel="#{buddy.network.className}-#{buddy.username}" class="sidebar_buddy buddy sidebar_station sidebar_link"> 
 					<a href="">
 						<span class="icon remove"></span>
 						<span class="icon"></span>
@@ -264,6 +350,12 @@ class View.BuddySidebarSection
 			[networkClassName, username] = entry.attr("rel").split("-")
 			@controller.removeBuddy(networkClassName, username)
 		)
+		$("li.sidebar_buddy .label").click((event) =>
+			event.preventDefault()
+			entry = $(event.currentTarget).parent().parent()
+			[networkClassName, username] = entry.attr("rel").split("-")
+			@controller.tune(networkClassName, username)
+		)
 		console.log("view refreshed")
 
 Controller = {}
@@ -274,19 +366,26 @@ class Controller.Radio
 		@view = new View.BuddySidebarSection(@radio, @)
 	
 	start: () ->
-		@view.init() # loading buddies...
+		@view.init()
 		@radio.buddyManager.loadLocal()
 		@view.refresh()
-		# start routine....
+		loop
+			hold(30000)
+			@radio.buddyManager.refreshListeningData()
+			@view.refresh()
 		
 	addLastFmBuddy: (username) ->
 		@radio.buddyManager.addBuddy("Model.LastFmBuddyNetwork", username)
 		@view.refresh()
 		
 	removeBuddy: (networkClassName, username) ->
-		@radio.buddyManager.removeBuddy(networkClassName, username)
+		@radio.buddyManager.removeBuddy(@radio.buddyManager.getBuddy(networkClassName, username))
 		@view.refresh()
-	
+		
+	tune: (networkClassName, username) ->
+		@radio.tune(@radio.buddyManager.getBuddy(networkClassName, username))
+		@view.refresh()
+		
 # END
 	
 	]]></>).toString();
@@ -294,6 +393,7 @@ class Controller.Radio
 	unsafeWindow.CScript = module.CoffeeScript;
 	unsafeWindow.CS = debugMultiLineHack;
 	var sjsSrc = module.CoffeeScript.compile(debugMultiLineHack);
+	unsafeWindow.SJS = sjsSrc;
 	unsafeWindow.require("local:buddyradio", {callback: radioLoaded, src: sjsSrc});
 }
 
