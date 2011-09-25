@@ -44,16 +44,18 @@ LastFmApi.key = "53cda3b9d8760dbded7b4ca420b5abb2"
 	
 Model = {}
 	
-class Model.SongRessource
+class Model.SongResource
 	constructor: () ->
-		@length = null # song length in seconds | null if unknown (yet)
+		@length = null # song length in ms | null if unknown (yet)
 	
-class Model.GroovesharkSongRessource extends Model.SongRessource
+class Model.GroovesharkSongResource extends Model.SongResource
 	constructor: (@songId) ->
 		
 class Model.Song
-	constructor: (@artist, @title, @listenedAt) -> # unix timestamp | null if current song
-		@ressources = null # null = not searched yet; [] = no ressources found
+	constructor: (@artist, @title, @listenedAt) -> # unix timestamp in s | null if current song
+		if not @listenedAt?
+			@listenedAt = Math.round(Date.now() / 1000)
+		@resources = null # null = not searched yet; [] = no resources found
 	
 class Model.Buddy
 	constructor: (@network, @username, @avatarUrl, @profileUrl) ->
@@ -62,6 +64,7 @@ class Model.Buddy
 		@pastSongs = []
 		@lastRefreshedAt = 0 # timestamp in ms
 		@eventListeners = []
+		@refreshListeningData()
 	
 	refreshListeningData: (force = false) ->
 		if not force and (Date.now() - @lastRefreshedAt) < 30000
@@ -70,7 +73,14 @@ class Model.Buddy
 		@lastRefreshedAt = Date.now()
 		data = @network.loadListeningData(@username)
 		@listeningStatus = data.listeningStatus
-		@currentSong = data.currentSong
+		# only update if new song (so that listenedAt doesn't get reset otherwise)
+		if @currentSong? and data.currentSong?
+			if @currentSong.artist != data.currentSong.artist or 
+			   @currentSong.title != data.currentSong.title or
+			   (@pastSongs.length > 0 and @pastSongs[0].listenedAt != data.pastSongs[0].listenedAt)
+				@currentSong = data.currentSong			
+		else
+			@currentSong = data.currentSong
 		@pastSongs = data.pastSongs
 		listener("listeningDataRefreshed", {buddy: @, forced: force}) for listener in @eventListeners # TODO only call if really changed
 		
@@ -94,9 +104,7 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 		catch e
 			console.log(e)
 			return
-		buddy = new Model.Buddy(this, user.name, user.image[0]["#text"], user.url)
-		buddy.refreshListeningData()
-		buddy
+		new Model.Buddy(this, user.name, user.image[0]["#text"], user.url)
 	
 	loadListeningData: (username) ->
 		console.log("getting recent tracks from Last.fm for #{username}")
@@ -171,9 +179,10 @@ class Model.BuddyManager
 		@eventListeners.push(listener)
 		
 	handleBuddyEvent: (name, data) =>
-		console.log("test" + name + data.forced)
 		if name == "listeningDataRefreshed" and data.forced
 			listener("listeningDataForcefullyRefreshed", data.buddy) for listener in @eventListeners
+		# TODO also inform listeners on non-forced update (otherwise there is a lag when streaming logic itself fetched new buddy data)
+		#      -> be careful about too much callback noise and UI refreshes etc.
 		
 	_findBuddyNetwork: (networkClassName) ->
 		@buddyNetworks.filter((network) -> network.className == networkClassName)[0]
@@ -185,11 +194,11 @@ class Model.StreamingNetwork
 	registerListener: (listener) ->
 		@eventListeners.push(listener)
 		
-	findSongRessource: (artist, title) -> throw new Error("must be overriden")
-	canPlay: (songRessource) -> throw new Error("must be overriden") # true if this network can handle the specific ressource
-	play: (songRessource) -> throw new Error("must be overriden")
+	findSongResource: (artist, title) -> throw new Error("must be overriden")
+	canPlay: (songResource) -> throw new Error("must be overriden") # true if this network can handle the specific resource
+	play: (songResource) -> throw new Error("must be overriden")
 	stop: () -> throw new Error("must be overriden")
-	# declare "enqueue: (songRessource) ->" in subclass if network supports enqueueing
+	# declare "enqueue: (songResource) ->" in subclass if network supports enqueueing
 		
 class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 	constructor: () ->
@@ -198,77 +207,152 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			throw new Error("Grooveshark API not available or has changed")
 		Grooveshark.setSongStatusCallback(@handleGroovesharkEvent)
 
-	findSongRessource: (artist, title) ->
+	findSongResource: (artist, title) ->
 		url = http.constructURL("http://buddyradioproxy.appspot.com/tinysong/#{artist} #{title}")
 		response = http.json(url)
 		if response.SongID?
-			new Model.GroovesharkSongRessource(response.SongID)
+			new Model.GroovesharkSongResource(response.SongID)
 		else
 			null
 	
-	canPlay: (songRessource) ->
-		songRessource instanceof Model.GroovesharkSongRessource
+	canPlay: (songResource) ->
+		songResource instanceof Model.GroovesharkSongResource
 			
 	queuedSongIDs: []
+	songResourcesWithoutLength: []
 			
-	play: (songRessource) ->
-		console.log("playing... Grooveshark songID #{songRessource.songId}")
-		Grooveshark.addSongsByID([songRessource.songId])
-		hold(5000) # TODO do via callback
-		# skip songs which are in the queue 
-		# FIXME not reliable, goes into infinite loop very often
-		#while Grooveshark.getCurrentSongStatus().song.songID != songRessource.songId
-		#	Grooveshark.next()
-		if Grooveshark.getCurrentSongStatus().status == "paused" or Grooveshark.getCurrentSongStatus().status == "none" 
-			Grooveshark.play()
-		@queuedSongIDs.push(songRessource.songId)
+	play: (songResource) ->
+		console.log("playing... Grooveshark songID #{songResource.songId}")
+		@songResourcesWithoutLength.push(songResource)
+		Grooveshark.addSongsByID([songResource.songId])
+		# skip songs which are in the queue
+		waitfor
+			while Grooveshark.getCurrentSongStatus().song?.songID != songResource.songId
+				console.log("skipping to next song to get to the current one")
+				Grooveshark.next()
+				hold(500)
+		else
+			hold(10000)
+			console.warn("couldn't skip to current song in Grooveshark player")
+			return
+		@_playIfPaused()
+		@queuedSongIDs.push(songResource.songId)
 		
-	enqueue: (songRessource) ->
-		Grooveshark.addSongsByID([songRessource.songId])
-		if Grooveshark.getCurrentSongStatus().status == "paused" or Grooveshark.getCurrentSongStatus().status == "none" 
-			Grooveshark.play()
-		@queuedSongIDs.push(songRessource.songId)
+	enqueue: (songResource) ->
+		@songResourcesWithoutLength.push(songResource)
+		Grooveshark.addSongsByID([songResource.songId])
+		@queuedSongIDs.push(songResource.songId)
 
 	stop: () ->
 		Grooveshark.pause()
-		@queuedSongRessources = []
+		@queuedSongResources = []
 		# useful? Grooveshark.removeCurrentSongFromQueue()
+		
+	_playIfPaused: () ->
+		while ["paused", "none"].indexOf(Grooveshark.getCurrentSongStatus().status) != -1
+			Grooveshark.play()
+			hold(1000)
 		
 	handleGroovesharkEvent: (data) =>
 		status = data.status # one of: "none", "loading", "playing", "paused", "buffering", "failed", "completed"
 		song = data.song # can be null; useful: .songID, .estimateDuration, .calculatedDuration, .position
+		console.debug("GS: #{status}, song id: #{song?.songID}, calculated duration: #{song?.calculatedDuration}")
+		if song? and song.calculatedDuration != 0 and @songResourcesWithoutLength.some((resource) -> resource.songId == song.songID)
+			resource = @songResourcesWithoutLength.filter((resource) -> resource.songId == song.songID)[0]
+			resource.length = Math.round(song.calculatedDuration)
+			@songResourcesWithoutLength = @songResourcesWithoutLength.filter((res) -> res != resource)
+			console.log("song length set to #{resource.length} ms (songId #{song.songID})")
 		if status == "completed" and @queuedSongIDs.indexOf(song.songID) != -1
 			listener("streamingCompleted") for listener in @eventListeners
 		
 class Model.StreamingManager
 	constructor: (@streamingNetworks) ->
 		network.registerListener(@handleNetworkEvent) for network in @streamingNetworks
+		@eventListeners = []
+		
+	registerListener: (listener) ->
+		@eventListeners.push(listener)
 	
-	findAndAddSongRessources: (song) ->
-		ressources = (network.findSongRessource(song.artist, song.title) for network in @streamingNetworks)
-		song.ressources = ressources.filter((ressource) -> ressource?)
-		song.ressources.length > 0
+	findAndAddSongResources: (song) ->
+		resources = (network.findSongResource(song.artist, song.title) for network in @streamingNetworks)
+		song.resources = resources.filter((resource) -> resource?)
+		song.resources.length > 0
 		
+	stopRequest: false	
+	
 	stopStreaming: () ->
-		network.stop() for network in @streamingNetworks
-		# TODO stop not really necessary; just don't fetch&enqueue/play new tracks
-		
+		@stopRequest = true
+		listener("streamingStoppedByRequest") for listener in @eventListeners
+	
+	# TODO atm this would also play songs which the buddy played a few seconds and then skipped over it
+	#      an alternative would be to introduce near-realtime-playing, i.e. only play pastSongs which have been scrobbled (in case of Last.fm)
+	#      -> this would require some reworking of the whole structure
 	startStreamingFor: (buddy) ->
 		buddy.refreshListeningData(true)
 		if buddy.currentSong?
-			console.log("starting streaming for #{buddy.username}")
-			if @findAndAddSongRessources(buddy.currentSong)			
-				firstRessource = buddy.currentSong.ressources[0]
-				network = @streamingNetworks.filter((network) -> network.canPlay(firstRessource))[0]
-				network.play(firstRessource)
-			# todo
-			true
+			console.log("starting streaming for #{buddy.username}, informing listeners")
+			listener("streamingStarted", buddy) for listener in @eventListeners
+			lastSongListenedAt = -1 # time when buddy listened to last song
+			lastSongListened = null # last song the buddy listened to
+			lastSongStreamedResource = null # last song resource we listened to
+			lastSongStreamedNetwork = null # network of last song we could actually stream
+			loop
+				buddy.refreshListeningData()
+				if not buddy.currentSong? # TODO "and no more queued songs" -> fix when more than grooveshark integrated
+					buddyInactivityTimeout = 5*60000
+					songLength =
+						if lastSongStreamedResource?.length?
+							lastSongStreamedResource.length
+						else
+							5*60000
+					timeout = songLength + buddyInactivityTimeout
+					console.log("lastSongListenedAt: #{lastSongListenedAt} timeout: #{timeout} song length: #{songLength}")
+					if (Date.now() - (lastSongListenedAt*1000)) > timeout
+						console.log("buddy inactive, stopping stream (timeout = #{songLength} (song length) + #{buddyInactivityTimeout} (default buddy timeout)")
+						listener("streamingStoppedBuddyNotLive", buddy) for listener in @eventListeners
+						break
+					else
+						hold(15000)
+						buddy.refreshListeningData(true)
+						continue
+				if @stopRequest
+					break
+				if lastSongListenedAt != buddy.currentSong.listenedAt
+					console.log("different #{lastSongListenedAt} #{buddy.currentSong.listenedAt}")
+					lastSongListenedAt = buddy.currentSong.listenedAt
+					if @findAndAddSongResources(buddy.currentSong)
+						preferredResource = @_getPreferredResource(buddy.currentSong.resources, lastSongStreamedNetwork)
+						lastSongStreamedResource = preferredResource
+						network = @streamingNetworks.filter((network) -> network.canPlay(preferredResource))[0]
+						if lastSongStreamedNetwork == network
+							network.enqueue(preferredResource)
+						else
+							# TODO wait here (hold) until last song in queue is over (needs to be implemented when not only Grooveshark is used!)
+							network.play(preferredResource)
+							lastSongStreamedNetwork = network
+				# TODO if song length - current position < 30000 and end of queue, then shorter hold
+				hold(30000)
 		else
-			false		
+			console.log("streaming not started for #{buddy.username} (went offline or disabled), informing listeners")
+			listener("streamingNotStarted", buddy) for listener in @eventListeners
+			
+	_getPreferredResource: (resources, preferredNetwork) ->
+		# prefer songs from same network to make use of queueing and more seamless transitions
+		if not preferredNetwork?
+			resources[0]
+		else
+			matchingResource = resources.filter((resource) =>
+				network = @streamingNetworks.filter((network) -> network.canPlay(resource))[0]
+				network == preferredNetwork
+			)
+			if matchingResource.length == 0
+				resources[0]
+			else
+				matchingResource[0]
 		
 	playingSong: null 
 	playingPosition: null # playing position in seconds
-	queuedSongs: []   
+	queuedSongResources: []   
 	playedSongs: []  
 	isAlternativeSong: false
 	noSongFound: false
@@ -281,6 +365,7 @@ class Model.Radio
 		@buddyManager = new Model.BuddyManager(@buddyNetworks)
 		@buddyManager.registerListener(@handleBuddyManagerEvent)
 		@streamingManager = new Model.StreamingManager(@streamingNetworks)
+		@streamingManager.registerListener(@handleStreamingManagerEvent)
 		@eventListeners = []
 	
 	onAirBuddy: null
@@ -290,9 +375,7 @@ class Model.Radio
 			@tuneOut()
 		else
 			@tuneOut()
-			if @streamingManager.startStreamingFor(buddy)
-				@onAirBuddy = buddy
-				listener("tunedIn", buddy) for listener in @eventListeners
+			@streamingManager.startStreamingFor(buddy)
 	
 	tuneOut: () ->
 		if @onAirBuddy?
@@ -308,7 +391,18 @@ class Model.Radio
 		if name == "buddyRemoved"
 			if @onAirBuddy == data
 				@tuneOut()
-
+				
+	handleStreamingManagerEvent: (name, data) =>
+		if name == "streamingStarted"
+			@onAirBuddy = data
+			listener("tunedIn", @onAirBuddy) for listener in @eventListeners
+		else if name == "streamingNotStarted"
+			listener("tuneFailed", data) for listener in @eventListeners
+		else if name == "streamingStoppedByRequest"
+			@onAirBuddy = null
+		else if name == "streamingStoppedBuddyNotLive"
+			@onAirBuddy = null
+			listener("radioStoppedNotLiveAnymore", data) for listener in @eventListeners
 View = {}
 	
 class View.BuddySidebarSection
@@ -320,6 +414,11 @@ class View.BuddySidebarSection
 	handleRadioEvent: (name, data) =>
 		if name == "tunedIn" or name == "tunedOut"
 			@_makeBold(data, name == "tunedIn")
+		else if name == "tuneFailed"
+			alert("Can't tune in. #{data.username} isn't listening songs at the moment.")
+		else if name == "radioStoppedNotLiveAnymore"
+			alert("#{data.username} isn't live anymore, radio will be stopped.")
+			@_makeBold(data, false)
 	
 	_makeBold: (buddy, bold = true) ->
 		label = $("li.sidebar_buddy[rel='#{buddy.network.className}-#{buddy.username}'] .label")
@@ -414,14 +513,14 @@ class View.BuddySidebarSection
 		) for buddy in sortedBuddies
 		$("li.sidebar_buddy .remove").click((event) =>
 			event.preventDefault()
+			event.stopPropagation()
 			entry = $(event.currentTarget).parent().parent()
 			[networkClassName, username] = entry.attr("rel").split("-")
 			@controller.removeBuddy(networkClassName, username)
 		)
-		$("li.sidebar_buddy .label").click((event) =>
+		$("li.sidebar_buddy").click((event) =>
 			event.preventDefault()
-			entry = $(event.currentTarget).parent().parent()
-			[networkClassName, username] = entry.attr("rel").split("-")
+			[networkClassName, username] = $(event.currentTarget).attr("rel").split("-")
 			@controller.tune(networkClassName, username)
 		)
 		console.log("view refreshed")
