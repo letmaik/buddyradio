@@ -60,10 +60,6 @@ class Model.Song
 			@listenedAt = Math.round(Date.now() / 1000)
 		@resources = null # null = not searched yet; [] = no resources found
 
-# TODO there is a short timespan in between two songs where the user appears offline because at this very moment
-#      and until the new song status was transmitted by e.g. last.fm client the user isn't "listening" to anything
-#      -> maybe apply new data when status is "off" only after second time "off" (i.e. remember it!)
-#       -> probably responsibility of specific BuddyNetwork class
 class Model.Buddy
 	constructor: (@network, @username, @avatarUrl, @profileUrl) ->
 		@listeningStatus = "off" # live | off | disabled
@@ -73,7 +69,7 @@ class Model.Buddy
 		@eventListeners = []
 		@refreshListeningData()
 	
-	refreshListeningData: (force = false) ->
+	refreshListeningData: (callerClassName, force = false) ->
 		if not force and (Date.now() - @lastRefreshedAt) < 30000
 			console.log("skipped refreshing of #{@username}; last refreshed #{Date.now() - @lastRefreshedAt} ms ago")
 			return
@@ -89,7 +85,7 @@ class Model.Buddy
 		else
 			@currentSong = data.currentSong
 		@pastSongs = data.pastSongs
-		listener("listeningDataRefreshed", {buddy: @, forced: force}) for listener in @eventListeners # TODO only call if really changed
+		listener("listeningDataRefreshed", {buddy: @, caller: callerClassName, forced: force}) for listener in @eventListeners # TODO only call if really changed
 		
 	registerListener: (listener) ->
 		@eventListeners.push(listener)
@@ -112,6 +108,12 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 			console.log(e)
 			return
 		new Model.Buddy(this, user.name, user.image[0]["#text"], user.url)
+	
+	# there is a short timespan in between two songs where the user appears offline because at this very moment
+	# and until the new song status is transmitted by e.g. the last.fm client the user isn't "listening" to anything
+	# _previousListeningData remembers the last received data and buffers it for handling the case "live -> off"
+	# so that the user appears as Live one more time before he finally appears as offline, see code below
+	_previousListeningData: [] # map username->data
 	
 	loadListeningData: (username) ->
 		console.log("getting recent tracks from Last.fm for #{username}")
@@ -136,7 +138,13 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 				track.date.uts
 			) for track in tracks when not track["@attr"]?.nowplaying)
 		listeningStatus = if currentSong? then "live" else "off"
-		{listeningStatus, currentSong, pastSongs}
+		if listeningStatus == "off" and @_previousListeningData[username]?.listeningStatus == "live"
+			console.log("#{username} was off one time, waiting for second time")
+			previous = {listeningStatus: "live", currentSong: @_previousListeningData[username].currentSong, pastSongs: @_previousListeningData[username].pastSongs}
+			@_previousListeningData[username] = {listeningStatus, currentSong, pastSongs}
+			previous
+		else
+			@_previousListeningData[username] = {listeningStatus, currentSong, pastSongs}
 		
 class Model.BuddyManager
 	constructor: (@buddyNetworks) ->
@@ -169,7 +177,7 @@ class Model.BuddyManager
 		listener("buddyRemoved", buddyToBeRemoved) for listener in @eventListeners
 			
 	refreshListeningData: () ->
-		buddy.refreshListeningData() for buddy in @buddies
+		buddy.refreshListeningData("Model.BuddyManager") for buddy in @buddies
 		listener("listeningDataRefreshed") for listener in @eventListeners
 		
 	saveLocal: () -> 
@@ -186,11 +194,9 @@ class Model.BuddyManager
 		@eventListeners.push(listener)
 		
 	handleBuddyEvent: (name, data) =>
-		if name == "listeningDataRefreshed" and data.forced
-			listener("listeningDataForcefullyRefreshed", data.buddy) for listener in @eventListeners
-		# TODO also inform listeners on non-forced update (otherwise there is a lag when streaming logic itself fetched new buddy data)
-		#      -> be careful about too much callback noise and UI refreshes etc.
-		
+		if name == "listeningDataRefreshed"
+			listener("listeningDataRefreshedFor", data) for listener in @eventListeners
+			
 	_findBuddyNetwork: (networkClassName) ->
 		@buddyNetworks.filter((network) -> network.className == networkClassName)[0]
 
@@ -279,6 +285,8 @@ class Model.StreamingManager
 		network.registerListener(@handleNetworkEvent) for network in @streamingNetworks
 		@eventListeners = []
 		
+	className: "Model.StreamingManager"
+		
 	registerListener: (listener) ->
 		@eventListeners.push(listener)
 	
@@ -297,7 +305,7 @@ class Model.StreamingManager
 	#      an alternative would be to introduce near-realtime-playing, i.e. only play pastSongs which have been scrobbled (in case of Last.fm)
 	#      -> this would require some reworking of the whole structure
 	startStreamingFor: (buddy) ->
-		buddy.refreshListeningData(true)
+		buddy.refreshListeningData(@className, true)
 		if buddy.currentSong?
 			console.log("starting streaming for #{buddy.username}, informing listeners")
 			listener("streamingStarted", buddy) for listener in @eventListeners
@@ -306,7 +314,7 @@ class Model.StreamingManager
 			lastSongStreamedResource = null # last song resource we listened to
 			lastSongStreamedNetwork = null # network of last song we could actually stream
 			loop
-				buddy.refreshListeningData()
+				buddy.refreshListeningData(@className)
 				if not buddy.currentSong? # TODO "and no more queued songs" -> fix when more than grooveshark integrated
 					buddyInactivityTimeout = 5*60000
 					songLength =
@@ -322,7 +330,7 @@ class Model.StreamingManager
 						break
 					else
 						hold(15000)
-						buddy.refreshListeningData(true)
+						buddy.refreshListeningData(@className, true)
 						continue
 				if @stopRequest
 					@stopRequest = false
@@ -437,11 +445,9 @@ class View.BuddySidebarSection
 			label.css("color", color)
 			
 	handleBuddyManagerEvent: (name, data) =>
-		if ["buddyRemoved", "buddyAdded", "listeningDataRefreshed", "buddiesLoaded"].indexOf(name) != -1
+		if ["buddyRemoved", "buddyAdded", "listeningDataRefreshed", "buddiesLoaded"].indexOf(name) != -1 or
+		   (name == "listeningDataRefreshedFor" and data.caller != "Model.BuddyManager")
 			@refresh()
-		if name == "listeningDataForcefullyRefreshed"
-			@refresh() # TODO smaller update?
-		# TODO listeningDataRefreshed callback per buddy (forward in buddyManager) and individual refresh
 		
 	init: () ->
 		$("#sidebar .container_inner").append("""
