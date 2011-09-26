@@ -43,6 +43,9 @@ LastFmApi = require("apollo:lastfm");
 LastFmApi.key = "53cda3b9d8760dbded7b4ca420b5abb2"
 	
 Model = {}
+
+# TODO Feature Idea: in addition to live-listening it would be cool to listen to previous timespans of the buddy
+#                    because it's often the case that the buddy isn't listening at the very moment -> Live mode, History mode
 	
 class Model.SongResource
 	constructor: () ->
@@ -56,7 +59,11 @@ class Model.Song
 		if not @listenedAt?
 			@listenedAt = Math.round(Date.now() / 1000)
 		@resources = null # null = not searched yet; [] = no resources found
-	
+
+# TODO there is a short timespan in between two songs where the user appears offline because at this very moment
+#      and until the new song status was transmitted by e.g. last.fm client the user isn't "listening" to anything
+#      -> maybe apply new data when status is "off" only after second time "off" (i.e. remember it!)
+#       -> probably responsibility of specific BuddyNetwork class
 class Model.Buddy
 	constructor: (@network, @username, @avatarUrl, @profileUrl) ->
 		@listeningStatus = "off" # live | off | disabled
@@ -242,6 +249,8 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		@songResourcesWithoutLength.push(songResource)
 		Grooveshark.addSongsByID([songResource.songId])
 		@queuedSongIDs.push(songResource.songId)
+		# FIXME if end of queue reached and there was no new song then enqueue won't play anything because it's paused
+		#       maybe better handle this in StreamManager, e.g. use play() instead of enqueue() in such a case
 
 	stop: () ->
 		Grooveshark.pause()
@@ -316,6 +325,7 @@ class Model.StreamingManager
 						buddy.refreshListeningData(true)
 						continue
 				if @stopRequest
+					@stopRequest = false
 					break
 				if lastSongListenedAt != buddy.currentSong.listenedAt
 					console.log("different #{lastSongListenedAt} #{buddy.currentSong.listenedAt}")
@@ -413,23 +423,26 @@ class View.BuddySidebarSection
 		
 	handleRadioEvent: (name, data) =>
 		if name == "tunedIn" or name == "tunedOut"
-			@_makeBold(data, name == "tunedIn")
+			@_applyStyle(data, name == "tunedIn")
 		else if name == "tuneFailed"
 			alert("Can't tune in. #{data.username} isn't listening songs at the moment.")
 		else if name == "radioStoppedNotLiveAnymore"
 			alert("#{data.username} isn't live anymore, radio will be stopped.")
-			@_makeBold(data, false)
+			@_applyStyle(data, false)
 	
-	_makeBold: (buddy, bold = true) ->
+	_applyStyle: (buddy, bold = true, color = null) ->
 		label = $("li.sidebar_buddy[rel='#{buddy.network.className}-#{buddy.username}'] .label")
 		label.css("font-weight", if bold then "bold" else "normal")
-	
+		if color?
+			label.css("color", color)
+			
 	handleBuddyManagerEvent: (name, data) =>
 		if ["buddyRemoved", "buddyAdded", "listeningDataRefreshed", "buddiesLoaded"].indexOf(name) != -1
 			@refresh()
 		if name == "listeningDataForcefullyRefreshed"
 			@refresh() # TODO smaller update?
-			
+		# TODO listeningDataRefreshed callback per buddy (forward in buddyManager) and individual refresh
+		
 	init: () ->
 		$("#sidebar .container_inner").append("""
 		<div id="sidebar_buddyradio_wrapper" class="listWrapper">
@@ -445,12 +458,12 @@ class View.BuddySidebarSection
         </div>
 		""")
 		newButton = $("#sidebar_buddyradio_wrapper .sidebarNew")
-		position = newButton.offset()
 		newButton.click( () =>
 			if $("#buddyradio_newuserform").length == 1
 				$("#buddyradio_newuserform").remove()
 				return
-
+				
+			position = newButton.offset()
 			$("body").append("""
 			<div id="buddyradio_newuserform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 220px; height:40px" class="jjmenu sidebarmenu jjsidebarMenuNew bottomOriented">
 				<div class="jj_menu_item">
@@ -483,7 +496,7 @@ class View.BuddySidebarSection
 		sortedBuddies = @radio.buddyManager.buddies.slice() # clone array
 		sortedBuddies.sort((a, b) ->
 			if a.listeningStatus == b.listeningStatus
-				if a.username < b.username then -1 else 1
+				if a.username.toLowerCase() < b.username.toLowerCase() then -1 else 1
 			else if a.listeningStatus == "live"
 				-1
 			else if b.listeningStatus == "live"
@@ -508,9 +521,11 @@ class View.BuddySidebarSection
 					</a>
 				</li>
 			""")
-			if @radio.onAirBuddy == buddy
-				@_makeBold(buddy, true)
+			bold = @radio.onAirBuddy == buddy
+			color = if buddy.listeningStatus == "off" then "black" else if buddy.listeningStatus == "disabled" then "gray" else null
+			@_applyStyle(buddy, bold, color)				
 		) for buddy in sortedBuddies
+		
 		$("li.sidebar_buddy .remove").click((event) =>
 			event.preventDefault()
 			event.stopPropagation()
@@ -539,13 +554,16 @@ class Controller.Radio
 			@radio.buddyManager.refreshListeningData()
 		
 	addBuddy: (networkClassName, username) ->
-		@radio.buddyManager.addBuddy(networkClassName, username)
+		if networkClassName and username
+			@radio.buddyManager.addBuddy(networkClassName, username)
 		
 	removeBuddy: (networkClassName, username) ->
-		@radio.buddyManager.removeBuddy(@radio.buddyManager.getBuddy(networkClassName, username))
+		if networkClassName and username
+			@radio.buddyManager.removeBuddy(@radio.buddyManager.getBuddy(networkClassName, username))
 		
 	tune: (networkClassName, username) ->
-		@radio.tune(@radio.buddyManager.getBuddy(networkClassName, username))
+		if networkClassName and username
+			@radio.tune(@radio.buddyManager.getBuddy(networkClassName, username))
 		
 # END
 	
