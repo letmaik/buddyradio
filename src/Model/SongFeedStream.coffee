@@ -4,54 +4,64 @@ class Model.SongFeedStream
 		@stopRequest = false
 		@queue = []
 		@eventListeners = []
+		@_stopRequestCall = () ->
 				
 	registerListener: (listener) ->
 		@eventListeners.push(listener)
 	
 	stopStreaming: () ->
 		@stopRequest = true
+		console.log("stop request received")
 		listener("streamingStoppedByRequest") for listener in @eventListeners
-	
+		@_stopRequestCall()
+			
 	startStreaming: () ->
 		lastSongReceivedAt = -1 # time when last song was available in feed
 		lastSongStreamedNetwork = null # network of last song we could actually stream
-		loop
-			console.log("next iteration")
-			if @stopRequest
-				@songFeed.dispose()
-				@stopRequest = false
-				return { status: "stopRequest" }
-			if not @songFeed.hasNext()
-				if @songFeed.hasOpenEnd()
-					console.log("holding..15secs")
-					hold(15000)
-					continue
-				else
-					console.info("end of feed, all available songs streamed")
-					# TODO inform listeners
-					return { status: "endOfFeed" }
-			else
-				song = @songFeed.next()
-				console.log("next: #{song}")
-				lastSongReceivedAt = Date.now()
-				if @_findAndAddSongResources(song)
-					preferredResource = @_getPreferredResource(song.resources, lastSongStreamedNetwork)
-					network = @streamingNetworks.filter((network) -> network.canPlay(preferredResource))[0]
-					if network.enqueue and lastSongStreamedNetwork == network and @queue.length > 0
-						@queue.push(preferredResource)
-						network.enqueue(preferredResource)
-						console.log("waiting")
-						@_waitUntilEndOfQueue(0.9)
+		
+		# TODO slow reaction on stopStreaming() because of hold's
+		# -> use waitfor and cancellation around loop
+		waitfor
+			loop
+				console.log("next iteration")
+				if @stopRequest
+					return { status: "stopRequest" }
+				if not @songFeed.hasNext()
+					if @songFeed.hasOpenEnd()
+						console.log("holding..15secs")
+						hold(15000)
+						continue
 					else
-						console.log("waiting 2")
-						@_waitUntilEndOfQueue(1.0)
-						@queue.push(preferredResource)
-						network.play(preferredResource)
-						lastSongStreamedNetwork = network
-						console.log("waiting 3")
-						@_waitUntilEndOfQueue(0.9)
+						console.info("end of feed, all available songs streamed")
+						# TODO inform listeners
+						return { status: "endOfFeed" }
 				else
-					continue # with next song in feed without waiting
+					song = @songFeed.next()
+					console.log("next: #{song}")
+					lastSongReceivedAt = Date.now()
+					if @_findAndAddSongResources(song)
+						preferredResource = @_getPreferredResource(song.resources, lastSongStreamedNetwork)
+						network = @streamingNetworks.filter((network) -> network.canPlay(preferredResource))[0]
+						if network.enqueue and lastSongStreamedNetwork == network and @queue.length > 0
+							@queue.push(preferredResource)
+							network.enqueue(preferredResource)
+							console.log("waiting")
+							@_waitUntilEndOfQueue(0.9)
+						else
+							console.log("waiting 2")
+							@_waitUntilEndOfQueue(1.0)
+							@queue.push(preferredResource)
+							network.play(preferredResource)
+							lastSongStreamedNetwork = network
+							console.log("waiting 3")
+							@_waitUntilEndOfQueue(0.9)
+					else
+						continue # with next song in feed without waiting
+		else
+			waitfor rv
+				@_stopRequestCall = resume
+			return { status: "stopRequest" }
+			
 			
 	dispose: () ->
 		if not @stopRequest
@@ -72,8 +82,10 @@ class Model.SongFeedStream
 			# the length or position isn't available yet
 			length = waitingResource.length
 			position = waitingResource.getPlayingPosition()
+			console.debug("length: #{length}, position: #{position}")
 			if length? and position?
 				songEndsIn = Math.round(factor * waitingResource.length - waitingResource.getPlayingPosition())
+				console.debug("songEndsIn: #{songEndsIn}")
 				if songEndsIn < 0
 					break
 				else if songEndsIn < 10000

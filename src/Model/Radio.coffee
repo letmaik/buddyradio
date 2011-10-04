@@ -25,11 +25,14 @@ class Model.Radio
 					@tuneOut()
 			buddy.registerListener(buddyListener)
 			result = @currentStream.startStreaming()
+			console.debug("stream returned: #{result.status}")
 			buddy.removeListener(buddyListener)
-			if result == "endOfFeed"
+			if result.status == "endOfFeed"
 				listener("streamCompleted", buddy) for listener in @eventListeners
-			else if result == "stopRequest"
+				console.info("stream completed")
+			else if result.status == "stopRequest"
 				listener("streamStopped", {buddy, reason: "request"}) for listener in @eventListeners
+				console.info("stream stopped")
 	
 	tuneOut: () ->
 		if @onAirBuddy?

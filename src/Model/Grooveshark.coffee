@@ -52,6 +52,7 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		Grooveshark.addSongsByID([songResource.songId])		
 		
 	getPlayingPosition: (songResource) ->
+		@cleanup()
 		gsSong = Grooveshark.getCurrentSongStatus().song
 		if gsSong? and gsSong.songID == songResource.songId
 			
@@ -66,7 +67,6 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			gsSong.position
 		else
 			null
-		@cleanup()
 		
 	cleanup: () ->
 		# sometimes grooveshark doesn't add and play a song when calling addSongsByID()

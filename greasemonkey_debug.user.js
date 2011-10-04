@@ -175,11 +175,14 @@ class Model.Radio
 					@tuneOut()
 			buddy.registerListener(buddyListener)
 			result = @currentStream.startStreaming()
+			console.debug("stream returned: #{result.status}")
 			buddy.removeListener(buddyListener)
-			if result == "endOfFeed"
+			if result.status == "endOfFeed"
 				listener("streamCompleted", buddy) for listener in @eventListeners
-			else if result == "stopRequest"
+				console.info("stream completed")
+			else if result.status == "stopRequest"
 				listener("streamStopped", {buddy, reason: "request"}) for listener in @eventListeners
+				console.info("stream stopped")
 	
 	tuneOut: () ->
 		if @onAirBuddy?
@@ -215,8 +218,7 @@ class Model.SongResource
 class Model.SongFeed
 	hasOpenEnd: () -> throw EOVR
 	hasNext: () -> throw EOVR		
-	next: () -> throw EOVR			
-	dispose: () ->
+	next: () -> throw EOVR
 	
 class Model.SequentialSongFeedCombinator extends Model.SongFeed
 	constructor: (@feeds...) ->
@@ -258,54 +260,64 @@ class Model.SongFeedStream
 		@stopRequest = false
 		@queue = []
 		@eventListeners = []
+		@_stopRequestCall = () ->
 				
 	registerListener: (listener) ->
 		@eventListeners.push(listener)
 	
 	stopStreaming: () ->
 		@stopRequest = true
+		console.log("stop request received")
 		listener("streamingStoppedByRequest") for listener in @eventListeners
-	
+		@_stopRequestCall()
+			
 	startStreaming: () ->
 		lastSongReceivedAt = -1 # time when last song was available in feed
 		lastSongStreamedNetwork = null # network of last song we could actually stream
-		loop
-			console.log("next iteration")
-			if @stopRequest
-				@songFeed.dispose()
-				@stopRequest = false
-				return { status: "stopRequest" }
-			if not @songFeed.hasNext()
-				if @songFeed.hasOpenEnd()
-					console.log("holding..15secs")
-					hold(15000)
-					continue
-				else
-					console.info("end of feed, all available songs streamed")
-					# TODO inform listeners
-					return { status: "endOfFeed" }
-			else
-				song = @songFeed.next()
-				console.log("next: #{song}")
-				lastSongReceivedAt = Date.now()
-				if @_findAndAddSongResources(song)
-					preferredResource = @_getPreferredResource(song.resources, lastSongStreamedNetwork)
-					network = @streamingNetworks.filter((network) -> network.canPlay(preferredResource))[0]
-					if network.enqueue and lastSongStreamedNetwork == network and @queue.length > 0
-						@queue.push(preferredResource)
-						network.enqueue(preferredResource)
-						console.log("waiting")
-						@_waitUntilEndOfQueue(0.9)
+		
+		# TODO slow reaction on stopStreaming() because of hold's
+		# -> use waitfor and cancellation around loop
+		waitfor
+			loop
+				console.log("next iteration")
+				if @stopRequest
+					return { status: "stopRequest" }
+				if not @songFeed.hasNext()
+					if @songFeed.hasOpenEnd()
+						console.log("holding..15secs")
+						hold(15000)
+						continue
 					else
-						console.log("waiting 2")
-						@_waitUntilEndOfQueue(1.0)
-						@queue.push(preferredResource)
-						network.play(preferredResource)
-						lastSongStreamedNetwork = network
-						console.log("waiting 3")
-						@_waitUntilEndOfQueue(0.9)
+						console.info("end of feed, all available songs streamed")
+						# TODO inform listeners
+						return { status: "endOfFeed" }
 				else
-					continue # with next song in feed without waiting
+					song = @songFeed.next()
+					console.log("next: #{song}")
+					lastSongReceivedAt = Date.now()
+					if @_findAndAddSongResources(song)
+						preferredResource = @_getPreferredResource(song.resources, lastSongStreamedNetwork)
+						network = @streamingNetworks.filter((network) -> network.canPlay(preferredResource))[0]
+						if network.enqueue and lastSongStreamedNetwork == network and @queue.length > 0
+							@queue.push(preferredResource)
+							network.enqueue(preferredResource)
+							console.log("waiting")
+							@_waitUntilEndOfQueue(0.9)
+						else
+							console.log("waiting 2")
+							@_waitUntilEndOfQueue(1.0)
+							@queue.push(preferredResource)
+							network.play(preferredResource)
+							lastSongStreamedNetwork = network
+							console.log("waiting 3")
+							@_waitUntilEndOfQueue(0.9)
+					else
+						continue # with next song in feed without waiting
+		else
+			waitfor rv
+				@_stopRequestCall = resume
+			return { status: "stopRequest" }
+			
 			
 	dispose: () ->
 		if not @stopRequest
@@ -326,8 +338,10 @@ class Model.SongFeedStream
 			# the length or position isn't available yet
 			length = waitingResource.length
 			position = waitingResource.getPlayingPosition()
+			console.debug("length: #{length}, position: #{position}")
 			if length? and position?
 				songEndsIn = Math.round(factor * waitingResource.length - waitingResource.getPlayingPosition())
+				console.debug("songEndsIn: #{songEndsIn}")
 				if songEndsIn < 0
 					break
 				else if songEndsIn < 10000
@@ -435,6 +449,7 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		Grooveshark.addSongsByID([songResource.songId])		
 		
 	getPlayingPosition: (songResource) ->
+		@cleanup()
 		gsSong = Grooveshark.getCurrentSongStatus().song
 		if gsSong? and gsSong.songID == songResource.songId
 			
@@ -449,7 +464,6 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			gsSong.position
 		else
 			null
-		@cleanup()
 		
 	cleanup: () ->
 		# sometimes grooveshark doesn't add and play a song when calling addSongsByID()
@@ -757,8 +771,10 @@ class View.BuddySidebarSection
 		@init()
 		
 	handleRadioEvent: (name, data) =>
-		if name == "streamStarted" or name == "streamStopped"
-			@_applyStyle(data, name == "streamStarted")
+		if name == "streamStarted"
+			@_applyStyle(data, true)
+		else if name == "streamStopped"
+			@_applyStyle(data.buddy, false)
 		else if name == "streamNotStarted" and data.reason == "disabled"
 			alert("Can't tune in. #{data.username} has disabled access to his song listening data.")
 		if name == "streamStopped" and data.reason == "disabled"
@@ -856,7 +872,7 @@ class View.BuddySidebarSection
 			""")
 			bold = @radio.onAirBuddy == buddy
 			color = if buddy.listeningStatus == "off" then "black" else if buddy.listeningStatus == "disabled" then "gray" else null
-			@_applyStyle(buddy, bold, color)				
+			@_applyStyle(buddy, bold, color)
 		) for buddy in sortedBuddies
 		
 		$("li.sidebar_buddy .remove").click((event) =>

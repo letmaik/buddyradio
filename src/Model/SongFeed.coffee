@@ -1,8 +1,7 @@
 class Model.SongFeed
 	hasOpenEnd: () -> throw EOVR
 	hasNext: () -> throw EOVR		
-	next: () -> throw EOVR			
-	dispose: () ->
+	next: () -> throw EOVR
 	
 class Model.SequentialSongFeedCombinator extends Model.SongFeed
 	constructor: (@feeds...) ->
