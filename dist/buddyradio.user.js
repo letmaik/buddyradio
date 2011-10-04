@@ -29,5 +29,5 @@ function loadBuddyRadioModule() {
 
 function loadBuddyRadio(err, module) {
 	if (err) throw ('error: ' + err);
-	module.start(unsafeWindow, unsafeDocument);
+	module.start(window, document);
 }
