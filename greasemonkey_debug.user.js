@@ -272,8 +272,6 @@ class Model.SongFeedStream
 		lastSongReceivedAt = -1 # time when last song was available in feed
 		lastSongStreamedNetwork = null # network of last song we could actually stream
 		
-		# TODO slow reaction on stopStreaming() because of hold's
-		# -> use waitfor and cancellation around loop
 		waitfor
 			loop
 				console.log("next iteration")
@@ -345,6 +343,10 @@ class Model.SongFeedStream
 					hold(songEndsIn)
 					break
 			hold(5000)
+		if @queue.length != 1
+			console.warn("queue length changed to #{@queue.length}")
+		if @queue > 0 and @queue[0] != waitingResource
+			console.warn("resource on which we are waiting for changed to #{@waitingResource}")
 	
 	_findAndAddSongResources: (song) ->
 		resources = (network.findSongResource(song.artist, song.title) for network in @streamingNetworks)
@@ -398,6 +400,9 @@ class Model.GroovesharkSongResource extends Model.SongResource
 		
 	getPlayingPosition: () ->
 		@groovesharkNetwork.getPlayingPosition(@)
+		
+	toString: () ->
+		"GroovesharkSongResource[songId: #{@songId}]"
 	
 class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 	constructor: () ->
@@ -439,7 +444,7 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			return
 		@currentSongShouldHaveStartedAt = Date.now()
 		@queuedSongResources.push(songResource)
-		@_playIfPaused()	
+		@_playIfPaused()
 		
 	enqueue: (songResource) ->
 		@queuedSongResources.push(songResource)
@@ -454,6 +459,7 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			# (it happened that even in "playing" status callback wrong length was reported,
 			#  but in "completed" it was right)
 			resources = @queuedSongResources.filter((resource) -> resource == songResource)
+			console.log(resources)
 			if resources.length == 1 and resources[0].length != null and Math.round(gsSong.calculatedDuration) > resources[0].length
 				console.log("song length corrected from #{resources[0].length}ms to #{Math.round(gsSong.calculatedDuration)}ms")
 				resources[0].length = Math.round(gsSong.calculatedDuration)
@@ -466,12 +472,16 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		# sometimes grooveshark doesn't add and play a song when calling addSongsByID()
 		# this leaves our queue in an inconsistent state so we have to clean it up now and then
 		if @queuedSongResources.length > 0 and
-		   @queuedSongResources[0].length == null and # length is taken as an indicator that the song was never played
-		   (Date.now() - @currentSongShouldHaveStartedAt) > 15000
-			console.warn("grooveshark got stuck... skipping song and fixing queue")
-			resource = @queuedSongResources.shift()
-			listener("streamingSkipped", resource) for listener in @eventListeners
-					
+		   @queuedSongResources[0].length == null # length is taken as an indicator that the song was never played
+			if (Date.now() - @currentSongShouldHaveStartedAt) > 10000
+				console.warn("grooveshark got stuck... trying to re-add current song")
+				resource = @queuedSongResources.shift()
+				@play(resource)
+			else if (Date.now() - @currentSongShouldHaveStartedAt) > 25000
+				console.warn("grooveshark got stuck... giving up. skipping song and fixing queue")
+				resource = @queuedSongResources.shift()
+				listener("streamingSkipped", resource) for listener in @eventListeners
+				
 	stop: () ->
 		Grooveshark.pause()
 		@queuedSongResources = []
@@ -490,21 +500,24 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			return
 		if song? and song.calculatedDuration != 0
 			resource = @queuedSongResources.filter((resource) -> resource.songId == song.songID)[0]
-			if resource.length != null
+			console.log("foo #{resource}")
+			if resource.length?
 				# grooveshark sometimes delivers wrong song lengths, so we try to correct it
 				if Math.round(song.calculatedDuration) > resource.length
 					console.log("song length corrected from #{resource.length}ms to #{Math.round(song.calculatedDuration)}ms")
 					resource.length = Math.round(song.calculatedDuration)
 			else
 				resource.length = Math.round(song.calculatedDuration)
-				console.debug("song length set to #{resource.length} ms (songId #{song.songID})")			
+				console.debug("song length set to #{resource.length} ms (songId #{song.songID})")
 		if status == "completed" or status == "failed"
 			while @queuedSongResources[0].songId != song.songID
+				console.info("song skipped, queue song id: #{@queuedSongResources[0].songId} event song id: #{song.songID}")
 				resource = @queuedSongResources.shift()
 				listener("streamingSkipped", resource) for listener in @eventListeners
 			if @queuedSongResources.length > 0
 				@currentSongShouldHaveStartedAt = Date.now()
 			resource = @queuedSongResources.shift()
+			console.log("foo2")
 			listener("streamingCompleted", resource) for listener in @eventListeners
 			# TODO status "failed" could be handled differently, e.g. trying to play() (works!) one more time
 			

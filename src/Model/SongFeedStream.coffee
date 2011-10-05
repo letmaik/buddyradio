@@ -19,8 +19,6 @@ class Model.SongFeedStream
 		lastSongReceivedAt = -1 # time when last song was available in feed
 		lastSongStreamedNetwork = null # network of last song we could actually stream
 		
-		# TODO slow reaction on stopStreaming() because of hold's
-		# -> use waitfor and cancellation around loop
 		waitfor
 			loop
 				console.log("next iteration")
@@ -92,6 +90,10 @@ class Model.SongFeedStream
 					hold(songEndsIn)
 					break
 			hold(5000)
+		if @queue.length != 1
+			console.warn("queue length changed to #{@queue.length}")
+		if @queue > 0 and @queue[0] != waitingResource
+			console.warn("resource on which we are waiting for changed to #{@waitingResource}")
 	
 	_findAndAddSongResources: (song) ->
 		resources = (network.findSongResource(song.artist, song.title) for network in @streamingNetworks)

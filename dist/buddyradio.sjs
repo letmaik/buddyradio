@@ -508,7 +508,7 @@
       return _results;
     };
     SongFeedStream.prototype._waitUntilEndOfQueue = function(factor) {
-      var length, position, songEndsIn, waitingResource, _results;
+      var length, position, songEndsIn, waitingResource;
       while (this.queue.length > 1) {
         console.debug("holding on... " + this.queue.length + " songs in queue");
         hold(5000);
@@ -516,7 +516,6 @@
       if (this.queue.length === 0) return;
       console.debug("holding on.. until song nearly finished");
       waitingResource = this.queue[0];
-      _results = [];
       while (this.queue.length === 1 && this.queue[0] === waitingResource) {
         length = waitingResource.length;
         position = waitingResource.getPlayingPosition();
@@ -531,9 +530,14 @@
             break;
           }
         }
-        _results.push(hold(5000));
+        hold(5000);
       }
-      return _results;
+      if (this.queue.length !== 1) {
+        console.warn("queue length changed to " + this.queue.length);
+      }
+      if (this.queue > 0 && this.queue[0] !== waitingResource) {
+        return console.warn("resource on which we are waiting for changed to " + this.waitingResource);
+      }
     };
     SongFeedStream.prototype._findAndAddSongResources = function(song) {
       var network, resources;
@@ -621,6 +625,9 @@
     GroovesharkSongResource.prototype.getPlayingPosition = function() {
       return this.groovesharkNetwork.getPlayingPosition(this);
     };
+    GroovesharkSongResource.prototype.toString = function() {
+      return "GroovesharkSongResource[songId: " + this.songId + "]";
+    };
     return GroovesharkSongResource;
   })();
   Model.GroovesharkStreamingNetwork = (function() {
@@ -687,6 +694,7 @@
         resources = this.queuedSongResources.filter(function(resource) {
           return resource === songResource;
         });
+        console.log(resources);
         if (resources.length === 1 && resources[0].length !== null && Math.round(gsSong.calculatedDuration) > resources[0].length) {
           console.log("song length corrected from " + resources[0].length + "ms to " + (Math.round(gsSong.calculatedDuration)) + "ms");
           resources[0].length = Math.round(gsSong.calculatedDuration);
@@ -698,16 +706,22 @@
     };
     GroovesharkStreamingNetwork.prototype.cleanup = function() {
       var listener, resource, _i, _len, _ref, _results;
-      if (this.queuedSongResources.length > 0 && this.queuedSongResources[0].length === null && (Date.now() - this.currentSongShouldHaveStartedAt) > 15000) {
-        console.warn("grooveshark got stuck... skipping song and fixing queue");
-        resource = this.queuedSongResources.shift();
-        _ref = this.eventListeners;
-        _results = [];
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          listener = _ref[_i];
-          _results.push(listener("streamingSkipped", resource));
+      if (this.queuedSongResources.length > 0 && this.queuedSongResources[0].length === null) {
+        if ((Date.now() - this.currentSongShouldHaveStartedAt) > 10000) {
+          console.warn("grooveshark got stuck... trying to re-add current song");
+          resource = this.queuedSongResources.shift();
+          return this.play(resource);
+        } else if ((Date.now() - this.currentSongShouldHaveStartedAt) > 25000) {
+          console.warn("grooveshark got stuck... giving up. skipping song and fixing queue");
+          resource = this.queuedSongResources.shift();
+          _ref = this.eventListeners;
+          _results = [];
+          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+            listener = _ref[_i];
+            _results.push(listener("streamingSkipped", resource));
+          }
+          return _results;
         }
-        return _results;
       }
     };
     GroovesharkStreamingNetwork.prototype.stop = function() {
@@ -737,7 +751,8 @@
         resource = this.queuedSongResources.filter(function(resource) {
           return resource.songId === song.songID;
         })[0];
-        if (resource.length !== null) {
+        console.log("foo " + resource);
+        if (resource.length != null) {
           if (Math.round(song.calculatedDuration) > resource.length) {
             console.log("song length corrected from " + resource.length + "ms to " + (Math.round(song.calculatedDuration)) + "ms");
             resource.length = Math.round(song.calculatedDuration);
@@ -749,6 +764,7 @@
       }
       if (status === "completed" || status === "failed") {
         while (this.queuedSongResources[0].songId !== song.songID) {
+          console.info("song skipped, queue song id: " + this.queuedSongResources[0].songId + " event song id: " + song.songID);
           resource = this.queuedSongResources.shift();
           _ref = this.eventListeners;
           for (_i = 0, _len = _ref.length; _i < _len; _i++) {
@@ -760,6 +776,7 @@
           this.currentSongShouldHaveStartedAt = Date.now();
         }
         resource = this.queuedSongResources.shift();
+        console.log("foo2");
         _ref2 = this.eventListeners;
         _results = [];
         for (_j = 0, _len2 = _ref2.length; _j < _len2; _j++) {
