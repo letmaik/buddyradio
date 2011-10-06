@@ -32,7 +32,8 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 	queuedSongResources: []
 	currentSongShouldHaveStartedAt = null # timestamp
 	lastFailedSongResource = null
-			
+	
+	# TODO play() doesn't have re-try functionality in case the song couldn't be added via .addSongsByID()
 	play: (songResource) ->
 		console.debug("playing... Grooveshark songID #{songResource.songId}")
 		Grooveshark.addSongsByID([songResource.songId])
@@ -122,10 +123,12 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			resource = @queuedSongResources.shift()
 			listener("streamingSkipped", resource) for listener in @eventListeners
 		
-		# check if current song finished playing, was skipped over, or failed to play
-		if ["completed", "failed", "none"].indexOf(status) != -1
+		# check if current song finished playing or failed to play
+		if ["completed", "failed"].indexOf(status) != -1
 			# note: "none" gets fired when next song is already loaded and user skipped to it
 			#       -> then the old song fires "none" instead of "completed"
+			#       "none" is also sometimes fired when a song hasn't started loading yet
+			#       -> too complicated atm to actually use it to detect song skipping
 			if @queuedSongResources.length > 0
 				@currentSongShouldHaveStartedAt = Date.now()
 			resource = @queuedSongResources.shift()

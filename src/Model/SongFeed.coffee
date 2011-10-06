@@ -23,17 +23,46 @@ class Model.SequentialSongFeedCombinator extends Model.SongFeed
 	next: () ->
 		@feeds[@_currentFeedIdx].next()
 		
+	addFeed: (feed) ->
+		@feeds.push(feed)
+		
 class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 	constructor: (@songsPerFeedInARow = 1, @feeds...) ->
 		if @feeds.length == 0
 			throw new Error("no feeds given!")
 		@_currentFeedIdx = 0
+		@_currentFeedSongsInARow = 0
 		
 	hasOpenEnd: () ->
 		@feeds.some((feed) -> feed.hasOpenEnd())
 		
 	hasNext: () ->
-		# TODO
+		if @feeds.length == 0
+			return false
+		if @_currentFeedSongsInARow < @songsPerFeedInARow and @feeds[@_currentFeedIdx].hasNext()
+			return true
+		@_currentFeedSongsInARow = 0
+		startIdx = @_currentFeedIdx
+		while not @feeds[@_currentFeedIdx].hasNext()
+			@_currentFeedIdx =
+				if @_currentFeedIdx == @feeds.length - 1
+					0
+				else
+					@_currentFeedIdx + 1
+			if @_currentFeedIdx == startIdx
+				return false
+		true
 		
 	next: () ->
-		# TODO
+		@feeds[@_currentFeedIdx].next()
+		@_currentFeedSongsInARow++
+		
+	addFeed: (feed) ->
+		@feeds.push(feed)
+		
+	removeFeed: (feedToRemove) ->
+		if not @feeds.some((feed) -> feed == feedToRemove)
+			throw new Error("feed cannot be removed (not found)")
+		@feeds = @feeds.filter((feed) -> feed != feedToRemove)
+		@_currentFeedIdx = 0
+		@_currentFeedSongsInARow = 0
