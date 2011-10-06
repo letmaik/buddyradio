@@ -15,12 +15,10 @@ class Model.Buddy
 		@network.getLiveFeed(@username)
 	
 	# fromTime, toTime: UTC unix timestamps
-	# fromTime set, toTime = null -> play songs beginning from fromTime
-	# fromTime set, toTime set -> play songs between the range
 	getHistoricFeed: (fromTime, toTime) ->
-		if (fromTime == null and toTime?) or (fromTime == toTime == null)
-			throw new Error("invalid param combination")
-		@network.createSongFeed(@, fromTime, toTime)
+		if fromTime == null or toTime == null
+			throw new Error("times must be given for historic feed")
+		@network.getHistoricFeed(@username, fromTime, toTime)
 	
 	registerListener: (listener) ->
 		@_eventListeners.push(listener)

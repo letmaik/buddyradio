@@ -31,6 +31,7 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			
 	queuedSongResources: []
 	currentSongShouldHaveStartedAt = null # timestamp
+	lastFailedSongResource = null
 			
 	play: (songResource) ->
 		console.debug("playing... Grooveshark songID #{songResource.songId}")
@@ -79,7 +80,9 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			if (Date.now() - @currentSongShouldHaveStartedAt) > 10000
 				console.warn("grooveshark got stuck... trying to re-add current song")
 				resource = @queuedSongResources.shift()
+				oldDate = @currentSongShouldHaveStartedAt
 				@play(resource)
+				@currentSongShouldHaveStartedAt = oldDate
 			else if (Date.now() - @currentSongShouldHaveStartedAt) > 25000
 				console.warn("grooveshark got stuck... giving up. skipping song and fixing queue")
 				resource = @queuedSongResources.shift()
@@ -99,9 +102,11 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		status = data.status # one of: "none", "loading", "playing", "paused", "buffering", "failed", "completed"
 		song = data.song # can be null; useful: .songID, .estimateDuration, .calculatedDuration, .position
 		console.debug("GS: #{status}, song id: #{song?.songID}, calculated duration: #{song?.calculatedDuration}, estimated duration: #{song?.estimateDuration}")
-		if not @queuedSongResources.some((resource) -> resource.songId == song.songID)
+		if not @queuedSongResources.some((resource) -> resource.songId == song?.songID)
 			return
-		if song? and song.calculatedDuration != 0
+		
+		# set or correct song length
+		if song.calculatedDuration != 0
 			resource = @queuedSongResources.filter((resource) -> resource.songId == song.songID)[0]
 			if resource.length?
 				# grooveshark sometimes delivers wrong song lengths, so we try to correct it
@@ -111,14 +116,29 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			else
 				resource.length = Math.round(song.calculatedDuration)
 				console.debug("song length set to #{resource.length} ms (songId #{song.songID})")
-		if status == "completed" or status == "failed"
-			while @queuedSongResources[0].songId != song.songID
-				resource = @queuedSongResources.shift()
-				listener("streamingSkipped", resource) for listener in @eventListeners
+		
+		# check if song was skipped
+		while @queuedSongResources[0].songId != song.songID
+			resource = @queuedSongResources.shift()
+			listener("streamingSkipped", resource) for listener in @eventListeners
+		
+		# check if current song finished playing, was skipped over, or failed to play
+		if ["completed", "failed", "none"].indexOf(status) != -1
+			# note: "none" gets fired when next song is already loaded and user skipped to it
+			#       -> then the old song fires "none" instead of "completed"
 			if @queuedSongResources.length > 0
 				@currentSongShouldHaveStartedAt = Date.now()
 			resource = @queuedSongResources.shift()
 			listener("streamingCompleted", resource) for listener in @eventListeners
-			# TODO status "failed" could be handled differently, e.g. trying to play() (works!) one more time
-			
+		
+		# try to fix failed song
+		if status == "failed"
+			# already tried to fix it one time, giving up now
+			if @lastFailedSongResource == @queuedSongResources[0]
+				listener("streamingFailed", @lastFailedSongResource) for listener in @eventListeners
+			# try to fix it
+			else
+				resource = @queuedSongResources.shift()
+				@lastFailedSongResource = resource
+				@play(resource)
 		

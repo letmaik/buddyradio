@@ -41,10 +41,10 @@
       return this.network.getLiveFeed(this.username);
     };
     Buddy.prototype.getHistoricFeed = function(fromTime, toTime) {
-      if ((fromTime === null && (toTime != null)) || ((fromTime === toTime && toTime === null))) {
-        throw new Error("invalid param combination");
+      if (fromTime === null || toTime === null) {
+        throw new Error("times must be given for historic feed");
       }
-      return this.network.createSongFeed(this, fromTime, toTime);
+      return this.network.getHistoricFeed(this.username, fromTime, toTime);
     };
     Buddy.prototype.registerListener = function(listener) {
       return this._eventListeners.push(listener);
@@ -585,6 +585,9 @@
       } else if (name === "streamingCompleted" && this.queue[0] === data) {
         console.log("song completed, shifting");
         return this.queue.shift();
+      } else if (name === "streamingFailed" && this.queue[0] === data) {
+        console.log("song failed to play, shifting");
+        return this.queue.shift();
       }
     };
     return SongFeedStream;
@@ -631,7 +634,7 @@
     return GroovesharkSongResource;
   })();
   Model.GroovesharkStreamingNetwork = (function() {
-    var currentSongShouldHaveStartedAt;
+    var currentSongShouldHaveStartedAt, lastFailedSongResource;
     __extends(GroovesharkStreamingNetwork, Model.StreamingNetwork);
     function GroovesharkStreamingNetwork() {
       this.handleGroovesharkEvent = __bind(this.handleGroovesharkEvent, this);      GroovesharkStreamingNetwork.__super__.constructor.call(this);
@@ -657,6 +660,7 @@
     };
     GroovesharkStreamingNetwork.prototype.queuedSongResources = [];
     currentSongShouldHaveStartedAt = null;
+    lastFailedSongResource = null;
     GroovesharkStreamingNetwork.prototype.play = function(songResource) {
       var listener, _i, _len, _ref, _ref2;
       console.debug("playing... Grooveshark songID " + songResource.songId);
@@ -694,9 +698,8 @@
         resources = this.queuedSongResources.filter(function(resource) {
           return resource === songResource;
         });
-        console.log(resources);
         if (resources.length === 1 && resources[0].length !== null && Math.round(gsSong.calculatedDuration) > resources[0].length) {
-          console.log("song length corrected from " + resources[0].length + "ms to " + (Math.round(gsSong.calculatedDuration)) + "ms");
+          console.debug("song length corrected from " + resources[0].length + "ms to " + (Math.round(gsSong.calculatedDuration)) + "ms");
           resources[0].length = Math.round(gsSong.calculatedDuration);
         }
         return gsSong.position;
@@ -705,12 +708,14 @@
       }
     };
     GroovesharkStreamingNetwork.prototype.cleanup = function() {
-      var listener, resource, _i, _len, _ref, _results;
+      var listener, oldDate, resource, _i, _len, _ref, _results;
       if (this.queuedSongResources.length > 0 && this.queuedSongResources[0].length === null) {
         if ((Date.now() - this.currentSongShouldHaveStartedAt) > 10000) {
           console.warn("grooveshark got stuck... trying to re-add current song");
           resource = this.queuedSongResources.shift();
-          return this.play(resource);
+          oldDate = this.currentSongShouldHaveStartedAt;
+          this.play(resource);
+          return this.currentSongShouldHaveStartedAt = oldDate;
         } else if ((Date.now() - this.currentSongShouldHaveStartedAt) > 25000) {
           console.warn("grooveshark got stuck... giving up. skipping song and fixing queue");
           resource = this.queuedSongResources.shift();
@@ -738,23 +743,22 @@
       return _results;
     };
     GroovesharkStreamingNetwork.prototype.handleGroovesharkEvent = function(data) {
-      var listener, resource, song, status, _i, _j, _len, _len2, _ref, _ref2, _results;
+      var listener, resource, song, status, _i, _j, _k, _len, _len2, _len3, _ref, _ref2, _ref3, _results;
       status = data.status;
       song = data.song;
       console.debug("GS: " + status + ", song id: " + (song != null ? song.songID : void 0) + ", calculated duration: " + (song != null ? song.calculatedDuration : void 0) + ", estimated duration: " + (song != null ? song.estimateDuration : void 0));
       if (!this.queuedSongResources.some(function(resource) {
-        return resource.songId === song.songID;
+        return resource.songId === (song != null ? song.songID : void 0);
       })) {
         return;
       }
-      if ((song != null) && song.calculatedDuration !== 0) {
+      if (song.calculatedDuration !== 0) {
         resource = this.queuedSongResources.filter(function(resource) {
           return resource.songId === song.songID;
         })[0];
-        console.log("foo " + resource);
         if (resource.length != null) {
           if (Math.round(song.calculatedDuration) > resource.length) {
-            console.log("song length corrected from " + resource.length + "ms to " + (Math.round(song.calculatedDuration)) + "ms");
+            console.debug("song length corrected from " + resource.length + "ms to " + (Math.round(song.calculatedDuration)) + "ms");
             resource.length = Math.round(song.calculatedDuration);
           }
         } else {
@@ -762,28 +766,39 @@
           console.debug("song length set to " + resource.length + " ms (songId " + song.songID + ")");
         }
       }
-      if (status === "completed" || status === "failed") {
-        while (this.queuedSongResources[0].songId !== song.songID) {
-          console.info("song skipped, queue song id: " + this.queuedSongResources[0].songId + " event song id: " + song.songID);
-          resource = this.queuedSongResources.shift();
-          _ref = this.eventListeners;
-          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-            listener = _ref[_i];
-            listener("streamingSkipped", resource);
-          }
+      while (this.queuedSongResources[0].songId !== song.songID) {
+        resource = this.queuedSongResources.shift();
+        _ref = this.eventListeners;
+        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+          listener = _ref[_i];
+          listener("streamingSkipped", resource);
         }
+      }
+      if (["completed", "failed", "none"].indexOf(status) !== -1) {
         if (this.queuedSongResources.length > 0) {
           this.currentSongShouldHaveStartedAt = Date.now();
         }
         resource = this.queuedSongResources.shift();
-        console.log("foo2");
         _ref2 = this.eventListeners;
-        _results = [];
         for (_j = 0, _len2 = _ref2.length; _j < _len2; _j++) {
           listener = _ref2[_j];
-          _results.push(listener("streamingCompleted", resource));
+          listener("streamingCompleted", resource);
         }
-        return _results;
+      }
+      if (status === "failed") {
+        if (this.lastFailedSongResource === this.queuedSongResources[0]) {
+          _ref3 = this.eventListeners;
+          _results = [];
+          for (_k = 0, _len3 = _ref3.length; _k < _len3; _k++) {
+            listener = _ref3[_k];
+            _results.push(listener("streamingFailed", this.lastFailedSongResource));
+          }
+          return _results;
+        } else {
+          resource = this.queuedSongResources.shift();
+          this.lastFailedSongResource = resource;
+          return this.play(resource);
+        }
       }
     };
     return GroovesharkStreamingNetwork;
@@ -896,7 +911,7 @@
       }).call(this);
     };
     LastFmBuddyNetwork.prototype.forceUpdateListeningData = function(username) {
-      return this._updateListeningData(username.toLowerCase(), 0);
+      return this._updateListeningData(username.toLowerCase(), 1000);
     };
     LastFmBuddyNetwork.prototype._updateListeningData = function(username, cacheLifetime) {
       var cache, currentSong, lastUpdate, newCurrentSong, newLastSong, oldLastSong, pastSongs, response, status, track, tracks, _ref, _ref2;
@@ -1087,16 +1102,56 @@
   Model.LastFmHistoricSongFeed = (function() {
     __extends(LastFmHistoricSongFeed, Model.LastFmSongFeed);
     function LastFmHistoricSongFeed(username, lastFmNetwork, fromTime, toTime) {
+      var response;
       this.username = username;
       this.lastFmNetwork = lastFmNetwork;
       this.fromTime = fromTime;
       this.toTime = toTime;
       LastFmHistoricSongFeed.__super__.constructor.call(this);
+      response = this._getPage(1);
+      if (response === null) throw new Error("listening history disabled");
+      this.page = response["@attr"].totalPages;
     }
     LastFmHistoricSongFeed.prototype.hasOpenEnd = function() {
       return false;
     };
-    LastFmHistoricSongFeed.prototype._updateFeed = function() {};
+    LastFmHistoricSongFeed.prototype._updateFeed = function() {
+      var response, track, tracks, _i, _len, _ref, _results;
+      if (this.page < 1) return;
+      response = this._getPage(this.page);
+      if (response === null) return;
+      this.page--;
+      tracks = (response.track || []).reverse();
+      _results = [];
+      for (_i = 0, _len = tracks.length; _i < _len; _i++) {
+        track = tracks[_i];
+        if (!((_ref = track["@attr"]) != null ? _ref.nowplaying : void 0)) {
+          _results.push(this._addSong(new Model.Song(track.artist["#text"], track.name, track.date.uts)));
+        }
+      }
+      return _results;
+    };
+    LastFmHistoricSongFeed.prototype._getPage = function(page) {
+      var response;
+      response = null;
+      try {
+        response = LastFmApi.get({
+          method: "user.getRecentTracks",
+          user: this.username,
+          from: this.fromTime,
+          to: this.toTime,
+          page: page
+        });
+      }
+      catch (e) {
+        if (e.code === 4) {
+          return null;
+        } else {
+          throw e;
+        }
+      }
+      return response;
+    };
     return LastFmHistoricSongFeed;
   })();
   View = {};

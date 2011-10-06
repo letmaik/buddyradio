@@ -18,6 +18,7 @@ class Model.Radio
 			@onAirBuddy = buddy
 			listener("streamStarted", buddy) for listener in @eventListeners
 			@currentStream = new Model.SongFeedStream(buddy.getLiveFeed(), @streamingNetworks)
+			#@currentStream = new Model.SongFeedStream(buddy.getHistoricFeed(1317773566, 1317856366), @streamingNetworks)
 			# @currentStream.registerListener(@_handleSongFeedStreamEvent)
 			buddyListener = (name, data) =>
 				if name == "statusChanged" and data == "disabled"

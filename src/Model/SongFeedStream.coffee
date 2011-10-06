@@ -126,3 +126,6 @@ class Model.SongFeedStream
 		else if name == "streamingCompleted" and @queue[0] == data
 			console.log("song completed, shifting")
 			@queue.shift()
+		else if name == "streamingFailed" and @queue[0] == data
+			console.log("song failed to play, shifting")
+			@queue.shift()

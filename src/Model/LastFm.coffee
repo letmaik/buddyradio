@@ -65,7 +65,7 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	getHistoricFeed: (username, fromTime, toTime) ->
 		if fromTime == null or toTime == null
 			throw new Error("wrong parameters")
-		new Model.LastFmHistoricSongFeed(username, @, fromTime, toTime)	
+		new Model.LastFmHistoricSongFeed(username, @, fromTime, toTime)
 			
 	registerListener: (listener, username) ->
 		user = username.toLowerCase()
@@ -83,7 +83,7 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 			(listener for listener in @_eventListeners[username.toLowerCase()] when listener != listenerToBeRemoved)
 	
 	forceUpdateListeningData: (username) ->
-		@_updateListeningData(username.toLowerCase(), 0)
+		@_updateListeningData(username.toLowerCase(), 1000)
 	
 	_updateListeningData: (username, cacheLifetime = 30000) ->
 		cache = if @_buddyListeningCache.hasOwnProperty(username) then @_buddyListeningCache[username] else null
@@ -243,8 +243,42 @@ class Model.LastFmLiveSongFeed extends Model.LastFmSongFeed
 class Model.LastFmHistoricSongFeed extends Model.LastFmSongFeed
 	constructor: (@username, @lastFmNetwork, @fromTime, @toTime) ->
 		super()
+		response = @_getPage(1)
+		if response == null
+			throw new Error("listening history disabled")
+		@page = response["@attr"].totalPages		
 
 	hasOpenEnd: () -> false
 		
-	_updateFeed: () -> 
-		# TODO
+	_updateFeed: () ->
+		if @page < 1
+			return
+		response = @_getPage(@page)
+		if response == null
+			return
+		@page--
+		tracks = (response.track or []).reverse()
+		@_addSong(
+			new Model.Song(
+				track.artist["#text"],
+				track.name,
+				track.date.uts
+			)
+		) for track in tracks when not track["@attr"]?.nowplaying
+			
+	_getPage: (page) ->
+		response = null
+		try
+			response = LastFmApi.get({
+				method: "user.getRecentTracks",
+				user: @username,
+				from: @fromTime,
+				to: @toTime,
+				page: page
+			})
+		catch e
+			if e.code == 4
+				return null
+			else
+				throw e
+		response

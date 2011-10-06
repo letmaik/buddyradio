@@ -58,12 +58,10 @@ class Model.Buddy
 		@network.getLiveFeed(@username)
 	
 	# fromTime, toTime: UTC unix timestamps
-	# fromTime set, toTime = null -> play songs beginning from fromTime
-	# fromTime set, toTime set -> play songs between the range
 	getHistoricFeed: (fromTime, toTime) ->
-		if (fromTime == null and toTime?) or (fromTime == toTime == null)
-			throw new Error("invalid param combination")
-		@network.createSongFeed(@, fromTime, toTime)
+		if fromTime == null or toTime == null
+			throw new Error("times must be given for historic feed")
+		@network.getHistoricFeed(@username, fromTime, toTime)
 	
 	registerListener: (listener) ->
 		@_eventListeners.push(listener)
@@ -165,6 +163,7 @@ class Model.Radio
 			@onAirBuddy = buddy
 			listener("streamStarted", buddy) for listener in @eventListeners
 			@currentStream = new Model.SongFeedStream(buddy.getLiveFeed(), @streamingNetworks)
+			#@currentStream = new Model.SongFeedStream(buddy.getHistoricFeed(1317773566, 1317856366), @streamingNetworks)
 			# @currentStream.registerListener(@_handleSongFeedStreamEvent)
 			buddyListener = (name, data) =>
 				if name == "statusChanged" and data == "disabled"
@@ -379,6 +378,9 @@ class Model.SongFeedStream
 		else if name == "streamingCompleted" and @queue[0] == data
 			console.log("song completed, shifting")
 			@queue.shift()
+		else if name == "streamingFailed" and @queue[0] == data
+			console.log("song failed to play, shifting")
+			@queue.shift()
 class Model.StreamingNetwork
 	constructor: () ->
 		@eventListeners = []
@@ -427,6 +429,7 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			
 	queuedSongResources: []
 	currentSongShouldHaveStartedAt = null # timestamp
+	lastFailedSongResource = null
 			
 	play: (songResource) ->
 		console.debug("playing... Grooveshark songID #{songResource.songId}")
@@ -459,9 +462,8 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			# (it happened that even in "playing" status callback wrong length was reported,
 			#  but in "completed" it was right)
 			resources = @queuedSongResources.filter((resource) -> resource == songResource)
-			console.log(resources)
 			if resources.length == 1 and resources[0].length != null and Math.round(gsSong.calculatedDuration) > resources[0].length
-				console.log("song length corrected from #{resources[0].length}ms to #{Math.round(gsSong.calculatedDuration)}ms")
+				console.debug("song length corrected from #{resources[0].length}ms to #{Math.round(gsSong.calculatedDuration)}ms")
 				resources[0].length = Math.round(gsSong.calculatedDuration)
 			
 			gsSong.position
@@ -476,7 +478,9 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			if (Date.now() - @currentSongShouldHaveStartedAt) > 10000
 				console.warn("grooveshark got stuck... trying to re-add current song")
 				resource = @queuedSongResources.shift()
+				oldDate = @currentSongShouldHaveStartedAt
 				@play(resource)
+				@currentSongShouldHaveStartedAt = oldDate
 			else if (Date.now() - @currentSongShouldHaveStartedAt) > 25000
 				console.warn("grooveshark got stuck... giving up. skipping song and fixing queue")
 				resource = @queuedSongResources.shift()
@@ -496,31 +500,45 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		status = data.status # one of: "none", "loading", "playing", "paused", "buffering", "failed", "completed"
 		song = data.song # can be null; useful: .songID, .estimateDuration, .calculatedDuration, .position
 		console.debug("GS: #{status}, song id: #{song?.songID}, calculated duration: #{song?.calculatedDuration}, estimated duration: #{song?.estimateDuration}")
-		if not @queuedSongResources.some((resource) -> resource.songId == song.songID)
+		if not @queuedSongResources.some((resource) -> resource.songId == song?.songID)
 			return
-		if song? and song.calculatedDuration != 0
+		
+		# set or correct song length
+		if song.calculatedDuration != 0
 			resource = @queuedSongResources.filter((resource) -> resource.songId == song.songID)[0]
-			console.log("foo #{resource}")
 			if resource.length?
 				# grooveshark sometimes delivers wrong song lengths, so we try to correct it
 				if Math.round(song.calculatedDuration) > resource.length
-					console.log("song length corrected from #{resource.length}ms to #{Math.round(song.calculatedDuration)}ms")
+					console.debug("song length corrected from #{resource.length}ms to #{Math.round(song.calculatedDuration)}ms")
 					resource.length = Math.round(song.calculatedDuration)
 			else
 				resource.length = Math.round(song.calculatedDuration)
 				console.debug("song length set to #{resource.length} ms (songId #{song.songID})")
-		if status == "completed" or status == "failed"
-			while @queuedSongResources[0].songId != song.songID
-				console.info("song skipped, queue song id: #{@queuedSongResources[0].songId} event song id: #{song.songID}")
-				resource = @queuedSongResources.shift()
-				listener("streamingSkipped", resource) for listener in @eventListeners
+		
+		# check if song was skipped
+		while @queuedSongResources[0].songId != song.songID
+			resource = @queuedSongResources.shift()
+			listener("streamingSkipped", resource) for listener in @eventListeners
+		
+		# check if current song finished playing, was skipped over, or failed to play
+		if ["completed", "failed", "none"].indexOf(status) != -1
+			# note: "none" gets fired when next song is already loaded and user skipped to it
+			#       -> then the old song fires "none" instead of "completed"
 			if @queuedSongResources.length > 0
 				@currentSongShouldHaveStartedAt = Date.now()
 			resource = @queuedSongResources.shift()
-			console.log("foo2")
 			listener("streamingCompleted", resource) for listener in @eventListeners
-			# TODO status "failed" could be handled differently, e.g. trying to play() (works!) one more time
-			
+		
+		# try to fix failed song
+		if status == "failed"
+			# already tried to fix it one time, giving up now
+			if @lastFailedSongResource == @queuedSongResources[0]
+				listener("streamingFailed", @lastFailedSongResource) for listener in @eventListeners
+			# try to fix it
+			else
+				resource = @queuedSongResources.shift()
+				@lastFailedSongResource = resource
+				@play(resource)
 		
 class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	name: "Last.fm"
@@ -589,7 +607,7 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	getHistoricFeed: (username, fromTime, toTime) ->
 		if fromTime == null or toTime == null
 			throw new Error("wrong parameters")
-		new Model.LastFmHistoricSongFeed(username, @, fromTime, toTime)	
+		new Model.LastFmHistoricSongFeed(username, @, fromTime, toTime)
 			
 	registerListener: (listener, username) ->
 		user = username.toLowerCase()
@@ -607,7 +625,7 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 			(listener for listener in @_eventListeners[username.toLowerCase()] when listener != listenerToBeRemoved)
 	
 	forceUpdateListeningData: (username) ->
-		@_updateListeningData(username.toLowerCase(), 0)
+		@_updateListeningData(username.toLowerCase(), 1000)
 	
 	_updateListeningData: (username, cacheLifetime = 30000) ->
 		cache = if @_buddyListeningCache.hasOwnProperty(username) then @_buddyListeningCache[username] else null
@@ -767,11 +785,45 @@ class Model.LastFmLiveSongFeed extends Model.LastFmSongFeed
 class Model.LastFmHistoricSongFeed extends Model.LastFmSongFeed
 	constructor: (@username, @lastFmNetwork, @fromTime, @toTime) ->
 		super()
+		response = @_getPage(1)
+		if response == null
+			throw new Error("listening history disabled")
+		@page = response["@attr"].totalPages		
 
 	hasOpenEnd: () -> false
 		
-	_updateFeed: () -> 
-		# TODO
+	_updateFeed: () ->
+		if @page < 1
+			return
+		response = @_getPage(@page)
+		if response == null
+			return
+		@page--
+		tracks = (response.track or []).reverse()
+		@_addSong(
+			new Model.Song(
+				track.artist["#text"],
+				track.name,
+				track.date.uts
+			)
+		) for track in tracks when not track["@attr"]?.nowplaying
+			
+	_getPage: (page) ->
+		response = null
+		try
+			response = LastFmApi.get({
+				method: "user.getRecentTracks",
+				user: @username,
+				from: @fromTime,
+				to: @toTime,
+				page: page
+			})
+		catch e
+			if e.code == 4
+				return null
+			else
+				throw e
+		response
 View = {}
 	
 class View.BuddySidebarSection
