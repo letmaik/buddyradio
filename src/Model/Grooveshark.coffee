@@ -8,6 +8,10 @@ class Model.GroovesharkSongResource extends Model.SongResource
 	toString: () ->
 		"GroovesharkSongResource[songId: #{@songId}]"
 	
+# FIXME: sometimes after a song is added in Grooveshark, it loads indefinitely!
+#        -> then my logic always detects "grooveshark got stuck.. trying to readd song" and does this indefinitely!!!
+#        -> solution: maybe also skip forward when trying to readd song?
+	
 class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 	constructor: () ->
 		super()

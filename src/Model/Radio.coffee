@@ -2,54 +2,56 @@ class Model.Radio
 	constructor: (@buddyNetworks, @streamingNetworks) ->
 		@buddyManager = new Model.BuddyManager(@buddyNetworks)
 		@buddyManager.registerListener(@_handleBuddyManagerEvent)
-		@currentStream = null
-		@eventListeners = []
-	
-	onAirBuddy: null
-	
+		@_currentStream = null
+		@_eventListeners = []
+		@_onAirBuddies = {} # map username -> SongFeed
+		@_feedCombinator = new Model.AlternatingSongFeedCombinator()
+		
 	tune: (buddy) ->
-		if @onAirBuddy == buddy
-			@tuneOut()
+		if @isOnAir(buddy)
+			@tuneOut(buddy)
 		else
-			@tuneOut()
 			if buddy.listeningStatus == "disabled"
-				listener("streamNotStarted", {buddy, reason: "disabled"}) for listener in @eventListeners
+				listener("errorTuningIn", {buddy, reason: "disabled"}) for listener in @_eventListeners
 				return
-			@onAirBuddy = buddy
-			listener("streamStarted", buddy) for listener in @eventListeners
-			@currentStream = new Model.SongFeedStream(buddy.getLiveFeed(), @streamingNetworks)
-			#@currentStream = new Model.SongFeedStream(buddy.getHistoricFeed(1317773566, 1317856366), @streamingNetworks)
-			# @currentStream.registerListener(@_handleSongFeedStreamEvent)
-			buddyListener = (name, data) =>
-				if name == "statusChanged" and data == "disabled"
-					listener("streamStopped", {buddy, reason: "disabled"}) for listener in @eventListeners
-					@tuneOut()
-			buddy.registerListener(buddyListener)
-			result = @currentStream.startStreaming()
-			console.debug("stream returned: #{result.status}")
-			buddy.removeListener(buddyListener)
-			if result.status == "endOfFeed"
-				listener("streamCompleted", buddy) for listener in @eventListeners
-				console.info("stream completed")
-			else if result.status == "stopRequest"
-				listener("streamStopped", {buddy, reason: "request"}) for listener in @eventListeners
-				console.info("stream stopped")
+			feed = buddy.getLiveFeed()
+			@_feedCombinator.addFeed(feed)
+			@_onAirBuddies[buddy.username] = feed
+			
+			listener("tunedIn", buddy) for listener in @_eventListeners
+			
+			if @_currentStream == null
+				@_currentStream = new Model.SongFeedStream(@_feedCombinator, @streamingNetworks)
+				result = @_currentStream.startStreaming()
+				console.debug("stream returned: #{result.status}")
+#				if result.status == "endOfFeed"
+#					listener("streamCompleted") for listener in @_eventListeners
+#					console.info("stream completed")
+#				else if result.status == "stopRequest"
+#					listener("streamStopped", {reason: "request"}) for listener in @_eventListeners
+#					console.info("stream stopped")
 	
-	tuneOut: () ->
-		if @onAirBuddy?
-			buddy = @onAirBuddy
-			@onAirBuddy = null
-			@currentStream.stopStreaming()
-			@currentStream.dispose()
-			@currentStream = null
+	tuneOut: (buddy, reason = "request") ->
+		if @isOnAir(buddy)
+			@_feedCombinator.removeFeed(@_onAirBuddies[buddy.username])
+			delete @_onAirBuddies[buddy.username]
+			listener("tunedOut", {buddy, reason}) for listener in @_eventListeners
+			if @_onAirBuddies.length == 0
+				@_currentStream.stopStreaming()
+				@_currentStream.dispose()
+				@_currentStream = null
 		
 	registerListener: (listener) ->
-		@eventListeners.push(listener)
+		@_eventListeners.push(listener)
+		
+	isOnAir: (buddy) ->
+		@_onAirBuddies.hasOwnProperty(buddy.username)
 	
 	_handleBuddyManagerEvent: (name, data) =>
-		if name == "buddyRemoved"
-			if @onAirBuddy == data
-				@tuneOut()
+		if name == "buddyRemoved" and @isOnAir(data)
+			@tuneOut(data, "buddyRemoved")
+		if name == "statusChanged" and data.data == "disabled" and @isOnAir(data.buddy)
+			@tuneOut(data.buddy, "disabled")
 				
 	_handleSongFeedStreamEvent: (name, data) =>
 		# TODO maybe get current song, or whatever for UI display

@@ -16,7 +16,7 @@ class Model.BuddyManager
 		network = @_findBuddyNetwork(buddyNetworkClassName)
 		if network.isValid(username)
 			buddy = new Model.Buddy(network, username)
-			buddy.registerListener(@handleBuddyEvent)
+			buddy.registerListener((name, data) => @_handleBuddyEvent(buddy, name, data))
 			@buddies.push(buddy)
 			@saveLocal()
 			console.info("user #{username} added, informing listeners")
@@ -45,9 +45,9 @@ class Model.BuddyManager
 	registerListener: (listener) ->
 		@eventListeners.push(listener)
 		
-	handleBuddyEvent: (name, data) =>
+	_handleBuddyEvent: (buddy, name, data) =>
 		if ["statusChanged", "lastSongChanged"].indexOf(name) != -1
-			listener(name, data) for listener in @eventListeners
+			listener(name, {buddy, data}) for listener in @eventListeners
 			
 	_findBuddyNetwork: (networkClassName) ->
 		@buddyNetworks.filter((network) -> network.className == networkClassName)[0]

@@ -7,14 +7,14 @@ class View.BuddySidebarSection
 		@init()
 		
 	handleRadioEvent: (name, data) =>
-		if name == "streamStarted"
+		if name == "tunedIn"
 			@_applyStyle(data, true)
-		else if name == "streamStopped"
+		else if name == "tunedOut"
 			@_applyStyle(data.buddy, false)
-		else if name == "streamNotStarted" and data.reason == "disabled"
-			alert("Can't tune in. #{data.username} has disabled access to his song listening data.")
-		if name == "streamStopped" and data.reason == "disabled"
-			alert("Radio for #{data.username} was stopped because the user has disabled access to his song listening data.")
+		else if name == "errorTuningIn" and data.reason == "disabled"
+			alert("Can't tune in. #{data.buddy.username} has disabled access to his song listening data.")
+		if name == "tunedOut" and data.reason == "disabled"
+			alert("Radio for #{data.buddy.username} was stopped because the user has disabled access to his song listening data.")
 	
 	_applyStyle: (buddy, bold = true, color = null) ->
 		label = $("li.sidebar_buddy[rel='#{buddy.network.className}-#{buddy.username}'] .label")
@@ -106,7 +106,7 @@ class View.BuddySidebarSection
 					</a>
 				</li>
 			""")
-			bold = @radio.onAirBuddy == buddy
+			bold = @radio.isOnAir(buddy)
 			color = if buddy.listeningStatus == "off" then "black" else if buddy.listeningStatus == "disabled" then "gray" else null
 			@_applyStyle(buddy, bold, color)
 		) for buddy in sortedBuddies

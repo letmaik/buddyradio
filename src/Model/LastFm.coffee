@@ -85,6 +85,7 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	forceUpdateListeningData: (username) ->
 		@_updateListeningData(username.toLowerCase(), 1000)
 	
+	# TODO add max requests per x seconds (needed when feed combiner iterates feeds and calls hasNext() on each feed)
 	_updateListeningData: (username, cacheLifetime = 30000) ->
 		cache = if @_buddyListeningCache.hasOwnProperty(username) then @_buddyListeningCache[username] else null
 		lastUpdate = if cache? then cache.lastUpdate else 0
@@ -211,8 +212,10 @@ class Model.LastFmLiveSongFeed extends Model.LastFmSongFeed
 		console.debug("songsToCheck: #{songsToCheck}")
 		console.debug("_songs: #{@_songs}")
 		# find starting position of new songs
-		# note: if songs are repeatedly playing exactly in same order then this algorithm will fail and won't find new songs
-		# could be circumvented by introducing 1-song delay (so that timestamps can be cpnsidered)
+		# note: if the same songs are repeatedly played exactly in same order and there was a longer pause 
+		#       where the user didn't fetch new songs then this algorithm might not find new songs
+		#       because it'd think that nothing changed (probably very rare)
+		#  -> could be circumvented by introducing 1-song delay (so that timestamps can be considered)
 		# (currently playing song doesn't have a timestamp (=primary key) in last.fm's listening history)
 		while oldIdx < @_songs.length and newIdx != songsToCheck.length
 			console.debug("pre-loop: oldIdx: #{oldIdx}, newIdx: #{newIdx}")

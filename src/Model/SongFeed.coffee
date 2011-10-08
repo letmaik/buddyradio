@@ -28,8 +28,6 @@ class Model.SequentialSongFeedCombinator extends Model.SongFeed
 		
 class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 	constructor: (@songsPerFeedInARow = 1, @feeds...) ->
-		if @feeds.length == 0
-			throw new Error("no feeds given!")
 		@_currentFeedIdx = 0
 		@_currentFeedSongsInARow = 0
 		
@@ -54,8 +52,8 @@ class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 		true
 		
 	next: () ->
-		@feeds[@_currentFeedIdx].next()
 		@_currentFeedSongsInARow++
+		@feeds[@_currentFeedIdx].next()
 		
 	addFeed: (feed) ->
 		@feeds.push(feed)

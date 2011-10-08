@@ -63,7 +63,8 @@
       }).call(this);
     };
     Buddy.prototype.dispose = function() {
-      return this.network.removeListener(this._networkListener, this.username);
+      this.network.removeListener(this._networkListener, this.username);
+      return this._eventListeners = [];
     };
     Buddy.prototype._handleNetworkEvent = function(name, data) {
       var listener, _i, _len, _ref, _results;
@@ -85,7 +86,7 @@
   Model.BuddyManager = (function() {
     function BuddyManager(buddyNetworks) {
       this.buddyNetworks = buddyNetworks;
-      this.handleBuddyEvent = __bind(this.handleBuddyEvent, this);
+      this._handleBuddyEvent = __bind(this._handleBuddyEvent, this);
     }
     BuddyManager.prototype.buddies = [];
     BuddyManager.prototype.storageKey = "buddyRadio_Buddies";
@@ -107,7 +108,9 @@
       network = this._findBuddyNetwork(buddyNetworkClassName);
       if (network.isValid(username)) {
         buddy = new Model.Buddy(network, username);
-        buddy.registerListener(this.handleBuddyEvent);
+        buddy.registerListener(__bind(function(name, data) {
+          return this._handleBuddyEvent(buddy, name, data);
+        }, this));
         this.buddies.push(buddy);
         this.saveLocal();
         console.info("user " + username + " added, informing listeners");
@@ -177,14 +180,17 @@
     BuddyManager.prototype.registerListener = function(listener) {
       return this.eventListeners.push(listener);
     };
-    BuddyManager.prototype.handleBuddyEvent = function(name, data) {
+    BuddyManager.prototype._handleBuddyEvent = function(buddy, name, data) {
       var listener, _i, _len, _ref, _results;
       if (["statusChanged", "lastSongChanged"].indexOf(name) !== -1) {
         _ref = this.eventListeners;
         _results = [];
         for (_i = 0, _len = _ref.length; _i < _len; _i++) {
           listener = _ref[_i];
-          _results.push(listener(name, data));
+          _results.push(listener(name, {
+            buddy: buddy,
+            data: data
+          }));
         }
         return _results;
       }
@@ -231,88 +237,75 @@
       this._handleBuddyManagerEvent = __bind(this._handleBuddyManagerEvent, this);
       this.buddyManager = new Model.BuddyManager(this.buddyNetworks);
       this.buddyManager.registerListener(this._handleBuddyManagerEvent);
-      this.currentStream = null;
-      this.eventListeners = [];
+      this._currentStream = null;
+      this._eventListeners = [];
+      this._onAirBuddies = {};
+      this._feedCombinator = new Model.AlternatingSongFeedCombinator();
     }
-    Radio.prototype.onAirBuddy = null;
     Radio.prototype.tune = function(buddy) {
-      var buddyListener, listener, result, _i, _j, _k, _l, _len, _len2, _len3, _len4, _ref, _ref2, _ref3, _ref4;
-      if (this.onAirBuddy === buddy) {
-        return this.tuneOut();
+      var feed, listener, result, _i, _j, _len, _len2, _ref, _ref2;
+      if (this.isOnAir(buddy)) {
+        return this.tuneOut(buddy);
       } else {
-        this.tuneOut();
         if (buddy.listeningStatus === "disabled") {
-          _ref = this.eventListeners;
+          _ref = this._eventListeners;
           for (_i = 0, _len = _ref.length; _i < _len; _i++) {
             listener = _ref[_i];
-            listener("streamNotStarted", {
+            listener("errorTuningIn", {
               buddy: buddy,
               reason: "disabled"
             });
           }
           return;
         }
-        this.onAirBuddy = buddy;
-        _ref2 = this.eventListeners;
+        feed = buddy.getLiveFeed();
+        this._feedCombinator.addFeed(feed);
+        this._onAirBuddies[buddy.username] = feed;
+        _ref2 = this._eventListeners;
         for (_j = 0, _len2 = _ref2.length; _j < _len2; _j++) {
           listener = _ref2[_j];
-          listener("streamStarted", buddy);
+          listener("tunedIn", buddy);
         }
-        this.currentStream = new Model.SongFeedStream(buddy.getLiveFeed(), this.streamingNetworks);
-        buddyListener = __bind(function(name, data) {
-          var listener, _k, _len3, _ref3;
-          if (name === "statusChanged" && data === "disabled") {
-            _ref3 = this.eventListeners;
-            for (_k = 0, _len3 = _ref3.length; _k < _len3; _k++) {
-              listener = _ref3[_k];
-              listener("streamStopped", {
-                buddy: buddy,
-                reason: "disabled"
-              });
-            }
-            return this.tuneOut();
-          }
-        }, this);
-        buddy.registerListener(buddyListener);
-        result = this.currentStream.startStreaming();
-        console.debug("stream returned: " + result.status);
-        buddy.removeListener(buddyListener);
-        if (result.status === "endOfFeed") {
-          _ref3 = this.eventListeners;
-          for (_k = 0, _len3 = _ref3.length; _k < _len3; _k++) {
-            listener = _ref3[_k];
-            listener("streamCompleted", buddy);
-          }
-          return console.info("stream completed");
-        } else if (result.status === "stopRequest") {
-          _ref4 = this.eventListeners;
-          for (_l = 0, _len4 = _ref4.length; _l < _len4; _l++) {
-            listener = _ref4[_l];
-            listener("streamStopped", {
-              buddy: buddy,
-              reason: "request"
-            });
-          }
-          return console.info("stream stopped");
+        if (this._currentStream === null) {
+          this._currentStream = new Model.SongFeedStream(this._feedCombinator, this.streamingNetworks);
+          result = this._currentStream.startStreaming();
+          return console.debug("stream returned: " + result.status);
         }
       }
     };
-    Radio.prototype.tuneOut = function() {
-      var buddy;
-      if (this.onAirBuddy != null) {
-        buddy = this.onAirBuddy;
-        this.onAirBuddy = null;
-        this.currentStream.stopStreaming();
-        this.currentStream.dispose();
-        return this.currentStream = null;
+    Radio.prototype.tuneOut = function(buddy, reason) {
+      var listener, _i, _len, _ref;
+      if (reason == null) reason = "request";
+      if (this.isOnAir(buddy)) {
+        this._feedCombinator.removeFeed(this._onAirBuddies[buddy.username]);
+        delete this._onAirBuddies[buddy.username];
+        _ref = this._eventListeners;
+        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+          listener = _ref[_i];
+          listener("tunedOut", {
+            buddy: buddy,
+            reason: reason
+          });
+        }
+        if (this._onAirBuddies.length === 0) {
+          this._currentStream.stopStreaming();
+          this._currentStream.dispose();
+          return this._currentStream = null;
+        }
       }
     };
     Radio.prototype.registerListener = function(listener) {
-      return this.eventListeners.push(listener);
+      return this._eventListeners.push(listener);
+    };
+    Radio.prototype.isOnAir = function(buddy) {
+      return this._onAirBuddies.hasOwnProperty(buddy.username);
     };
     Radio.prototype._handleBuddyManagerEvent = function(name, data) {
-      if (name === "buddyRemoved") {
-        if (this.onAirBuddy === data) return this.tuneOut();
+      if (name === "buddyRemoved" && this.isOnAir(data)) {
+        this.tuneOut(data, "buddyRemoved");
+      }
+      if (name === "statusChanged" && data.data === "disabled" && this.isOnAir(data.buddy)) {
+        return this.tuneOut(data.buddy, "disabled");
       }
     };
     Radio.prototype._handleSongFeedStreamEvent = function(name, data) {};
@@ -380,6 +373,9 @@
     SequentialSongFeedCombinator.prototype.next = function() {
       return this.feeds[this._currentFeedIdx].next();
     };
+    SequentialSongFeedCombinator.prototype.addFeed = function(feed) {
+      return this.feeds.push(feed);
+    };
     return SequentialSongFeedCombinator;
   })();
   Model.AlternatingSongFeedCombinator = (function() {
@@ -389,16 +385,47 @@
       songsPerFeedInARow = arguments[0], feeds = 2 <= arguments.length ? __slice.call(arguments, 1) : [];
       this.songsPerFeedInARow = songsPerFeedInARow != null ? songsPerFeedInARow : 1;
       this.feeds = feeds;
-      if (this.feeds.length === 0) throw new Error("no feeds given!");
       this._currentFeedIdx = 0;
+      this._currentFeedSongsInARow = 0;
     }
     AlternatingSongFeedCombinator.prototype.hasOpenEnd = function() {
       return this.feeds.some(function(feed) {
         return feed.hasOpenEnd();
       });
     };
-    AlternatingSongFeedCombinator.prototype.hasNext = function() {};
-    AlternatingSongFeedCombinator.prototype.next = function() {};
+    AlternatingSongFeedCombinator.prototype.hasNext = function() {
+      var startIdx;
+      if (this.feeds.length === 0) return false;
+      if (this._currentFeedSongsInARow < this.songsPerFeedInARow && this.feeds[this._currentFeedIdx].hasNext()) {
+        return true;
+      }
+      this._currentFeedSongsInARow = 0;
+      startIdx = this._currentFeedIdx;
+      while (!this.feeds[this._currentFeedIdx].hasNext()) {
+        this._currentFeedIdx = this._currentFeedIdx === this.feeds.length - 1 ? 0 : this._currentFeedIdx + 1;
+        if (this._currentFeedIdx === startIdx) return false;
+      }
+      return true;
+    };
+    AlternatingSongFeedCombinator.prototype.next = function() {
+      this._currentFeedSongsInARow++;
+      return this.feeds[this._currentFeedIdx].next();
+    };
+    AlternatingSongFeedCombinator.prototype.addFeed = function(feed) {
+      return this.feeds.push(feed);
+    };
+    AlternatingSongFeedCombinator.prototype.removeFeed = function(feedToRemove) {
+      if (!this.feeds.some(function(feed) {
+        return feed === feedToRemove;
+      })) {
+        throw new Error("feed cannot be removed (not found)");
+      }
+      this.feeds = this.feeds.filter(function(feed) {
+        return feed !== feedToRemove;
+      });
+      this._currentFeedIdx = 0;
+      return this._currentFeedSongsInARow = 0;
+    };
     return AlternatingSongFeedCombinator;
   })();
   Model.SongFeedStream = (function() {
@@ -433,6 +460,7 @@
     };
     SongFeedStream.prototype.startStreaming = function() {
       var lastSongReceivedAt, lastSongStreamedNetwork, network, preferredResource, rv, song, _results;
+      this.stopRequest = false;
       lastSongReceivedAt = -1;
       lastSongStreamedNetwork = null;
       waitfor {
@@ -774,7 +802,7 @@
           listener("streamingSkipped", resource);
         }
       }
-      if (["completed", "failed", "none"].indexOf(status) !== -1) {
+      if (["completed", "failed"].indexOf(status) !== -1) {
         if (this.queuedSongResources.length > 0) {
           this.currentSongShouldHaveStartedAt = Date.now();
         }
@@ -1166,15 +1194,15 @@
       this.init();
     }
     BuddySidebarSection.prototype.handleRadioEvent = function(name, data) {
-      if (name === "streamStarted") {
+      if (name === "tunedIn") {
         this._applyStyle(data, true);
-      } else if (name === "streamStopped") {
+      } else if (name === "tunedOut") {
         this._applyStyle(data.buddy, false);
-      } else if (name === "streamNotStarted" && data.reason === "disabled") {
-        alert("Can't tune in. " + data.username + " has disabled access to his song listening data.");
+      } else if (name === "errorTuningIn" && data.reason === "disabled") {
+        alert("Can't tune in. " + data.buddy.username + " has disabled access to his song listening data.");
       }
-      if (name === "streamStopped" && data.reason === "disabled") {
-        return alert("Radio for " + data.username + " was stopped because the user has disabled access to his song listening data.");
+      if (name === "tunedOut" && data.reason === "disabled") {
+        return alert("Radio for " + data.buddy.username + " was stopped because the user has disabled access to his song listening data.");
       }
     };
     BuddySidebarSection.prototype._applyStyle = function(buddy, bold, color) {
@@ -1249,7 +1277,7 @@
           }
         }
         $("#sidebar_buddyradio").append("<li title=\"" + buddy.username + " (" + buddy.network.name + ") - " + status + "\" rel=\"" + buddy.network.className + "-" + buddy.username + "\" class=\"sidebar_buddy buddy sidebar_station sidebar_link\"> \n	<a href=\"\">\n		<span class=\"icon remove\"></span>\n		<span class=\"icon\"></span>\n		<span class=\"label ellipsis\">" + buddy.username + "</span>\n	</a>\n</li>");
-        bold = this.radio.onAirBuddy === buddy;
+        bold = this.radio.isOnAir(buddy);
         color = buddy.listeningStatus === "off" ? "black" : buddy.listeningStatus === "disabled" ? "gray" : null;
         this._applyStyle(buddy, bold, color);
       }

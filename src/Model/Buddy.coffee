@@ -28,6 +28,7 @@ class Model.Buddy
 		
 	dispose: () ->
 		@network.removeListener(@_networkListener, @username)
+		@_eventListeners = []
 		
 	_handleNetworkEvent: (name, data) =>
 		if name == "statusChanged"

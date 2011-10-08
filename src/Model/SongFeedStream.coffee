@@ -16,6 +16,7 @@ class Model.SongFeedStream
 		@_stopRequestCall()
 			
 	startStreaming: () ->
+		@stopRequest = false
 		lastSongReceivedAt = -1 # time when last song was available in feed
 		lastSongStreamedNetwork = null # network of last song we could actually stream
 		

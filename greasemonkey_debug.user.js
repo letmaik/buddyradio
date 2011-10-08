@@ -38,9 +38,6 @@ LastFmApi.key = "53cda3b9d8760dbded7b4ca420b5abb2"
 
 EOVR = new Error("must be overriden")
 Model = {}
-
-# TODO Feature Idea: in addition to live-listening it would be cool to listen to previous timespans of the buddy
-#                    because it's often the case that the buddy isn't listening at the very moment -> Live mode, History mode
 class Model.Buddy
 	constructor: (@network, @username) ->
 		info = @network.getInfo(@username)
@@ -71,6 +68,7 @@ class Model.Buddy
 		
 	dispose: () ->
 		@network.removeListener(@_networkListener, @username)
+		@_eventListeners = []
 		
 	_handleNetworkEvent: (name, data) =>
 		if name == "statusChanged"
@@ -96,7 +94,7 @@ class Model.BuddyManager
 		network = @_findBuddyNetwork(buddyNetworkClassName)
 		if network.isValid(username)
 			buddy = new Model.Buddy(network, username)
-			buddy.registerListener(@handleBuddyEvent)
+			buddy.registerListener((name, data) => @_handleBuddyEvent(buddy, name, data))
 			@buddies.push(buddy)
 			@saveLocal()
 			console.info("user #{username} added, informing listeners")
@@ -125,9 +123,9 @@ class Model.BuddyManager
 	registerListener: (listener) ->
 		@eventListeners.push(listener)
 		
-	handleBuddyEvent: (name, data) =>
+	_handleBuddyEvent: (buddy, name, data) =>
 		if ["statusChanged", "lastSongChanged"].indexOf(name) != -1
-			listener(name, data) for listener in @eventListeners
+			listener(name, {buddy, data}) for listener in @eventListeners
 			
 	_findBuddyNetwork: (networkClassName) ->
 		@buddyNetworks.filter((network) -> network.className == networkClassName)[0]
@@ -147,54 +145,56 @@ class Model.Radio
 	constructor: (@buddyNetworks, @streamingNetworks) ->
 		@buddyManager = new Model.BuddyManager(@buddyNetworks)
 		@buddyManager.registerListener(@_handleBuddyManagerEvent)
-		@currentStream = null
-		@eventListeners = []
-	
-	onAirBuddy: null
-	
+		@_currentStream = null
+		@_eventListeners = []
+		@_onAirBuddies = {} # map username -> SongFeed
+		@_feedCombinator = new Model.AlternatingSongFeedCombinator()
+		
 	tune: (buddy) ->
-		if @onAirBuddy == buddy
-			@tuneOut()
+		if @isOnAir(buddy)
+			@tuneOut(buddy)
 		else
-			@tuneOut()
 			if buddy.listeningStatus == "disabled"
-				listener("streamNotStarted", {buddy, reason: "disabled"}) for listener in @eventListeners
+				listener("errorTuningIn", {buddy, reason: "disabled"}) for listener in @_eventListeners
 				return
-			@onAirBuddy = buddy
-			listener("streamStarted", buddy) for listener in @eventListeners
-			@currentStream = new Model.SongFeedStream(buddy.getLiveFeed(), @streamingNetworks)
-			#@currentStream = new Model.SongFeedStream(buddy.getHistoricFeed(1317773566, 1317856366), @streamingNetworks)
-			# @currentStream.registerListener(@_handleSongFeedStreamEvent)
-			buddyListener = (name, data) =>
-				if name == "statusChanged" and data == "disabled"
-					listener("streamStopped", {buddy, reason: "disabled"}) for listener in @eventListeners
-					@tuneOut()
-			buddy.registerListener(buddyListener)
-			result = @currentStream.startStreaming()
-			console.debug("stream returned: #{result.status}")
-			buddy.removeListener(buddyListener)
-			if result.status == "endOfFeed"
-				listener("streamCompleted", buddy) for listener in @eventListeners
-				console.info("stream completed")
-			else if result.status == "stopRequest"
-				listener("streamStopped", {buddy, reason: "request"}) for listener in @eventListeners
-				console.info("stream stopped")
+			feed = buddy.getLiveFeed()
+			@_feedCombinator.addFeed(feed)
+			@_onAirBuddies[buddy.username] = feed
+			
+			listener("tunedIn", buddy) for listener in @_eventListeners
+			
+			if @_currentStream == null
+				@_currentStream = new Model.SongFeedStream(@_feedCombinator, @streamingNetworks)
+				result = @_currentStream.startStreaming()
+				console.debug("stream returned: #{result.status}")
+#				if result.status == "endOfFeed"
+#					listener("streamCompleted") for listener in @_eventListeners
+#					console.info("stream completed")
+#				else if result.status == "stopRequest"
+#					listener("streamStopped", {reason: "request"}) for listener in @_eventListeners
+#					console.info("stream stopped")
 	
-	tuneOut: () ->
-		if @onAirBuddy?
-			buddy = @onAirBuddy
-			@onAirBuddy = null
-			@currentStream.stopStreaming()
-			@currentStream.dispose()
-			@currentStream = null
+	tuneOut: (buddy, reason = "request") ->
+		if @isOnAir(buddy)
+			@_feedCombinator.removeFeed(@_onAirBuddies[buddy.username])
+			delete @_onAirBuddies[buddy.username]
+			listener("tunedOut", {buddy, reason}) for listener in @_eventListeners
+			if @_onAirBuddies.length == 0
+				@_currentStream.stopStreaming()
+				@_currentStream.dispose()
+				@_currentStream = null
 		
 	registerListener: (listener) ->
-		@eventListeners.push(listener)
+		@_eventListeners.push(listener)
+		
+	isOnAir: (buddy) ->
+		@_onAirBuddies.hasOwnProperty(buddy.username)
 	
 	_handleBuddyManagerEvent: (name, data) =>
-		if name == "buddyRemoved"
-			if @onAirBuddy == data
-				@tuneOut()
+		if name == "buddyRemoved" and @isOnAir(data)
+			@tuneOut(data, "buddyRemoved")
+		if name == "statusChanged" and data.data == "disabled" and @isOnAir(data.buddy)
+			@tuneOut(data.buddy, "disabled")
 				
 	_handleSongFeedStreamEvent: (name, data) =>
 		# TODO maybe get current song, or whatever for UI display
@@ -236,20 +236,47 @@ class Model.SequentialSongFeedCombinator extends Model.SongFeed
 	next: () ->
 		@feeds[@_currentFeedIdx].next()
 		
+	addFeed: (feed) ->
+		@feeds.push(feed)
+		
 class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 	constructor: (@songsPerFeedInARow = 1, @feeds...) ->
-		if @feeds.length == 0
-			throw new Error("no feeds given!")
 		@_currentFeedIdx = 0
+		@_currentFeedSongsInARow = 0
 		
 	hasOpenEnd: () ->
 		@feeds.some((feed) -> feed.hasOpenEnd())
 		
 	hasNext: () ->
-		# TODO
+		if @feeds.length == 0
+			return false
+		if @_currentFeedSongsInARow < @songsPerFeedInARow and @feeds[@_currentFeedIdx].hasNext()
+			return true
+		@_currentFeedSongsInARow = 0
+		startIdx = @_currentFeedIdx
+		while not @feeds[@_currentFeedIdx].hasNext()
+			@_currentFeedIdx =
+				if @_currentFeedIdx == @feeds.length - 1
+					0
+				else
+					@_currentFeedIdx + 1
+			if @_currentFeedIdx == startIdx
+				return false
+		true
 		
 	next: () ->
-		# TODO
+		@_currentFeedSongsInARow++
+		@feeds[@_currentFeedIdx].next()
+		
+	addFeed: (feed) ->
+		@feeds.push(feed)
+		
+	removeFeed: (feedToRemove) ->
+		if not @feeds.some((feed) -> feed == feedToRemove)
+			throw new Error("feed cannot be removed (not found)")
+		@feeds = @feeds.filter((feed) -> feed != feedToRemove)
+		@_currentFeedIdx = 0
+		@_currentFeedSongsInARow = 0
 class Model.SongFeedStream
 	constructor: (@songFeed, @streamingNetworks) ->
 		network.registerListener(@_handleStreamingNetworkEvent) for network in @streamingNetworks
@@ -268,6 +295,7 @@ class Model.SongFeedStream
 		@_stopRequestCall()
 			
 	startStreaming: () ->
+		@stopRequest = false
 		lastSongReceivedAt = -1 # time when last song was available in feed
 		lastSongStreamedNetwork = null # network of last song we could actually stream
 		
@@ -406,6 +434,10 @@ class Model.GroovesharkSongResource extends Model.SongResource
 	toString: () ->
 		"GroovesharkSongResource[songId: #{@songId}]"
 	
+# FIXME: sometimes after a song is added in Grooveshark, it loads indefinitely!
+#        -> then my logic always detects "grooveshark got stuck.. trying to readd song" and does this indefinitely!!!
+#        -> solution: maybe also skip forward when trying to readd song?
+	
 class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 	constructor: () ->
 		super()
@@ -430,7 +462,8 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 	queuedSongResources: []
 	currentSongShouldHaveStartedAt = null # timestamp
 	lastFailedSongResource = null
-			
+	
+	# TODO play() doesn't have re-try functionality in case the song couldn't be added via .addSongsByID()
 	play: (songResource) ->
 		console.debug("playing... Grooveshark songID #{songResource.songId}")
 		Grooveshark.addSongsByID([songResource.songId])
@@ -520,10 +553,12 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			resource = @queuedSongResources.shift()
 			listener("streamingSkipped", resource) for listener in @eventListeners
 		
-		# check if current song finished playing, was skipped over, or failed to play
-		if ["completed", "failed", "none"].indexOf(status) != -1
+		# check if current song finished playing or failed to play
+		if ["completed", "failed"].indexOf(status) != -1
 			# note: "none" gets fired when next song is already loaded and user skipped to it
 			#       -> then the old song fires "none" instead of "completed"
+			#       "none" is also sometimes fired when a song hasn't started loading yet
+			#       -> too complicated atm to actually use it to detect song skipping
 			if @queuedSongResources.length > 0
 				@currentSongShouldHaveStartedAt = Date.now()
 			resource = @queuedSongResources.shift()
@@ -627,6 +662,7 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	forceUpdateListeningData: (username) ->
 		@_updateListeningData(username.toLowerCase(), 1000)
 	
+	# TODO add max requests per x seconds (needed when feed combiner iterates feeds and calls hasNext() on each feed)
 	_updateListeningData: (username, cacheLifetime = 30000) ->
 		cache = if @_buddyListeningCache.hasOwnProperty(username) then @_buddyListeningCache[username] else null
 		lastUpdate = if cache? then cache.lastUpdate else 0
@@ -753,8 +789,10 @@ class Model.LastFmLiveSongFeed extends Model.LastFmSongFeed
 		console.debug("songsToCheck: #{songsToCheck}")
 		console.debug("_songs: #{@_songs}")
 		# find starting position of new songs
-		# note: if songs are repeatedly playing exactly in same order then this algorithm will fail and won't find new songs
-		# could be circumvented by introducing 1-song delay (so that timestamps can be cpnsidered)
+		# note: if the same songs are repeatedly played exactly in same order and there was a longer pause 
+		#       where the user didn't fetch new songs then this algorithm might not find new songs
+		#       because it'd think that nothing changed (probably very rare)
+		#  -> could be circumvented by introducing 1-song delay (so that timestamps can be considered)
 		# (currently playing song doesn't have a timestamp (=primary key) in last.fm's listening history)
 		while oldIdx < @_songs.length and newIdx != songsToCheck.length
 			console.debug("pre-loop: oldIdx: #{oldIdx}, newIdx: #{newIdx}")
@@ -833,14 +871,14 @@ class View.BuddySidebarSection
 		@init()
 		
 	handleRadioEvent: (name, data) =>
-		if name == "streamStarted"
+		if name == "tunedIn"
 			@_applyStyle(data, true)
-		else if name == "streamStopped"
+		else if name == "tunedOut"
 			@_applyStyle(data.buddy, false)
-		else if name == "streamNotStarted" and data.reason == "disabled"
-			alert("Can't tune in. #{data.username} has disabled access to his song listening data.")
-		if name == "streamStopped" and data.reason == "disabled"
-			alert("Radio for #{data.username} was stopped because the user has disabled access to his song listening data.")
+		else if name == "errorTuningIn" and data.reason == "disabled"
+			alert("Can't tune in. #{data.buddy.username} has disabled access to his song listening data.")
+		if name == "tunedOut" and data.reason == "disabled"
+			alert("Radio for #{data.buddy.username} was stopped because the user has disabled access to his song listening data.")
 	
 	_applyStyle: (buddy, bold = true, color = null) ->
 		label = $("li.sidebar_buddy[rel='#{buddy.network.className}-#{buddy.username}'] .label")
@@ -932,7 +970,7 @@ class View.BuddySidebarSection
 					</a>
 				</li>
 			""")
-			bold = @radio.onAirBuddy == buddy
+			bold = @radio.isOnAir(buddy)
 			color = if buddy.listeningStatus == "off" then "black" else if buddy.listeningStatus == "disabled" then "gray" else null
 			@_applyStyle(buddy, bold, color)
 		) for buddy in sortedBuddies
