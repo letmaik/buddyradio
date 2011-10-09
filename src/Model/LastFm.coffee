@@ -9,6 +9,11 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 #				for own username, listeners of @_eventListeners
 #					@_updateListeningData(username)
 #				hold(60000)
+
+	# terms of service: "You will not make more than 5 requests per originating IP address per second, averaged over a 5 minute period"
+	# -> this is equal to max 5*60*5=1500 requests per 5 minutes
+	# as this is quite high anyway, we will limit it to 500 requests per 5 minutes so that the browser has room to breath
+	_rateLimiter: new Model.APIRateLimiter(500, 300)
 	
 	_buddyCache: {} # map (username -> {avatarUrl, profileUrl})
 	_buddyListeningCache: {} # map (username -> {lastUpdate, status, currentSong, pastSongs})
@@ -85,17 +90,20 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	forceUpdateListeningData: (username) ->
 		@_updateListeningData(username.toLowerCase(), 1000)
 	
-	# TODO add max requests per x seconds (needed when feed combiner iterates feeds and calls hasNext() on each feed)
 	_updateListeningData: (username, cacheLifetime = 30000) ->
 		cache = if @_buddyListeningCache.hasOwnProperty(username) then @_buddyListeningCache[username] else null
 		lastUpdate = if cache? then cache.lastUpdate else 0
 		if (Date.now() - lastUpdate) < cacheLifetime
 			# console.debug("skipped updating listening data of #{username}; last refreshed #{Date.now() - lastUpdate} ms ago (cache lifetime: #{cacheLifetime})")
 			return
-	
+		if not @_rateLimiter.canSend()
+			console.warn("Last.fm API rate limit exceeded, skipping update of #{username}'s listening data")
+			return
+			
 		console.info("getting recent tracks and status from Last.fm for #{username}")
 		response = null
 		try 
+			@_rateLimiter.count()
 			response = LastFmApi.get({method: "user.getRecentTracks", user: username})
 		catch e
 			if e.code == 4

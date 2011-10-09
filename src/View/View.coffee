@@ -1,5 +1,8 @@
 View = {}
-	
+
+# TODO Feature idea: make the orange station icon glow when a song from the particular buddy is played
+#      -> this is esp. useful when multiple buddies are listened to
+
 class View.BuddySidebarSection
 	constructor: (@radio, @controller) ->
 		@radio.registerListener(@handleRadioEvent)
@@ -21,7 +24,8 @@ class View.BuddySidebarSection
 		label.css("font-weight", if bold then "bold" else "normal")
 		if color?
 			label.css("color", color)
-			
+	
+	# FIXME when buddies are offline then too many events are received resulting in too many refreshes -> check that!
 	handleBuddyManagerEvent: (name, data) =>
 		if ["buddyRemoved", "buddyAdded", "statusChanged", "lastSongChanged", "buddiesLoaded"].indexOf(name) != -1
 			@refresh()
@@ -63,14 +67,13 @@ class View.BuddySidebarSection
 			</div>
 			""")
 			$("#buddyradio_newuser").focus()
-			$("#buddyradio_adduserbutton").click(() =>
+			onConfirm = () =>
 				@controller.addBuddy("Model.LastFmBuddyNetwork", $("#buddyradio_newuser")[0].value)
 				$("#buddyradio_newuserform").remove()
-			)
+			$("#buddyradio_adduserbutton").click(onConfirm)
 			$("#buddyradio_newuser").keydown((event) =>
 				if event.which == 13
-					@controller.addBuddy("Model.LastFmBuddyNetwork", $("#buddyradio_newuser")[0].value)
-					$("#buddyradio_newuserform").remove()
+					onConfirm()
 			)
 		)
 	refresh: () ->
@@ -91,7 +94,7 @@ class View.BuddySidebarSection
 		)
 		(
 			status = buddy.listeningStatus.toUpperCase()
-			if status == "LIVE" or status == "OFF"
+			if (status == "LIVE" or status == "OFF") and buddy.lastSong?
 				song = "#{buddy.lastSong.artist} - #{buddy.lastSong.title}"
 				if status == "LIVE"
 					status += ", listening to: #{song}"

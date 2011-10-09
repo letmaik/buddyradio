@@ -22,6 +22,7 @@ class Model.Radio
 			
 			if @_currentStream == null
 				@_currentStream = new Model.SongFeedStream(@_feedCombinator, @streamingNetworks)
+				console.debug("starting new stream")
 				result = @_currentStream.startStreaming()
 				console.debug("stream returned: #{result.status}")
 #				if result.status == "endOfFeed"
@@ -36,7 +37,7 @@ class Model.Radio
 			@_feedCombinator.removeFeed(@_onAirBuddies[buddy.username])
 			delete @_onAirBuddies[buddy.username]
 			listener("tunedOut", {buddy, reason}) for listener in @_eventListeners
-			if @_onAirBuddies.length == 0
+			if Object.keys(@_onAirBuddies).length == 0
 				@_currentStream.stopStreaming()
 				@_currentStream.dispose()
 				@_currentStream = null

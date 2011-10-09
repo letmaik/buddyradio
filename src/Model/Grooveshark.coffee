@@ -7,11 +7,7 @@ class Model.GroovesharkSongResource extends Model.SongResource
 		
 	toString: () ->
 		"GroovesharkSongResource[songId: #{@songId}]"
-	
-# FIXME: sometimes after a song is added in Grooveshark, it loads indefinitely!
-#        -> then my logic always detects "grooveshark got stuck.. trying to readd song" and does this indefinitely!!!
-#        -> solution: maybe also skip forward when trying to readd song?
-	
+		
 class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 	constructor: () ->
 		super()
@@ -86,6 +82,10 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 				console.warn("grooveshark got stuck... trying to re-add current song")
 				resource = @queuedSongResources.shift()
 				oldDate = @currentSongShouldHaveStartedAt
+				# if current song got stuck indefinitely in loading state, 
+				# then remove it first, so that skipping logic in play() works when adding the song again
+				if Grooveshark.getCurrentSongStatus().song?.songID == resource.songId
+					Grooveshark.removeCurrentSongFromQueue()
 				@play(resource)
 				@currentSongShouldHaveStartedAt = oldDate
 			else if (Date.now() - @currentSongShouldHaveStartedAt) > 25000

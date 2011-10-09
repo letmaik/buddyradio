@@ -57,10 +57,12 @@ class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 		
 	addFeed: (feed) ->
 		@feeds.push(feed)
+		console.debug("feed added")
 		
 	removeFeed: (feedToRemove) ->
 		if not @feeds.some((feed) -> feed == feedToRemove)
 			throw new Error("feed cannot be removed (not found)")
 		@feeds = @feeds.filter((feed) -> feed != feedToRemove)
 		@_currentFeedIdx = 0
+		console.debug("feed removed")
 		@_currentFeedSongsInARow = 0

@@ -3,6 +3,7 @@ $main = @()
 $files =
 	"Main",
 	"Model\Model",
+	"Model\APIRateLimiter",
 	"Model\Buddy",
 	"Model\BuddyManager",
 	"Model\BuddyNetwork",
