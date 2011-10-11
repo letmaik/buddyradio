@@ -1,0 +1,1 @@
+Some icons by Yusuke Kamiyamane. All rights reserved. Licensed under Creative Commons Attribution 3.0.

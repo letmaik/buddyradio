@@ -81,6 +81,7 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	_notifyListeners: (username, name, data) ->
 		if not @_eventListeners.hasOwnProperty(username)
 			return
+		console.debug("last.fm notify: #{username} #{name} #{data}") 
 		listener(name, data) for listener in @_eventListeners[username]
 		
 	removeListener: (listenerToBeRemoved, username) ->
@@ -107,7 +108,7 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 			response = LastFmApi.get({method: "user.getRecentTracks", user: username})
 		catch e
 			if e.code == 4
-				if @cache?.status != "disabled"
+				if cache?.status != "disabled"
 					@_notifyListeners(username, "statusChanged", "disabled")
 				@_buddyListeningCache[username] = {lastUpdate: Date.now(), status: "disabled", currentSong: null, pastSongs: []}
 				return
@@ -126,7 +127,7 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 				track.date.uts
 			) for track in tracks when not track["@attr"]?.nowplaying)
 		status = if currentSong? then "live" else "off"
-		if status != @cache?.status
+		if status != cache?.status
 			@_notifyListeners(username, "statusChanged", status)
 		
 		# there is a short timespan in between two songs where the user appears offline because at this very moment
@@ -147,7 +148,10 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 			oldLastSong = if cache? then @_doGetLastSong(username) else null
 			@_buddyListeningCache[username] = {lastUpdate: Date.now(), status, currentSong: newCurrentSong, pastSongs}
 			newLastSong = @_doGetLastSong(username)
-			if oldLastSong != newLastSong
+			if oldLastSong? and newLastSong?
+				if oldLastSong.listenedAt != newLastSong.listenedAt
+					@_notifyListeners(username, "lastSongChanged", newLastSong)
+			else if oldLastSong != newLastSong
 				@_notifyListeners(username, "lastSongChanged", newLastSong)
 
 class Model.LastFmSongFeed extends Model.SongFeed

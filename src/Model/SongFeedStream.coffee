@@ -2,17 +2,17 @@ class Model.SongFeedStream
 	constructor: (@songFeed, @streamingNetworks) ->
 		network.registerListener(@_handleStreamingNetworkEvent) for network in @streamingNetworks
 		@stopRequest = false
-		@queue = []
-		@eventListeners = []
+		@queue = [] # array of {song, resource}
+		@_eventListeners = []
 		@_stopRequestCall = () ->
 				
 	registerListener: (listener) ->
-		@eventListeners.push(listener)
+		@_eventListeners.push(listener)
 	
 	stopStreaming: () ->
 		@stopRequest = true
 		console.log("stop request received")
-		listener("streamingStoppedByRequest") for listener in @eventListeners
+		listener("streamingStoppedByRequest") for listener in @_eventListeners
 		@_stopRequestCall()
 			
 	startStreaming: () ->
@@ -42,14 +42,15 @@ class Model.SongFeedStream
 						preferredResource = @_getPreferredResource(song.resources, lastSongStreamedNetwork)
 						network = @streamingNetworks.filter((network) -> network.canPlay(preferredResource))[0]
 						if network.enqueue and lastSongStreamedNetwork == network and @queue.length > 0
-							@queue.push(preferredResource)
+							@queue.push({song, resource: preferredResource})
 							network.enqueue(preferredResource)
 							console.log("waiting")
 							@_waitUntilEndOfQueue(0.9)
 						else
 							console.log("waiting 2")
 							@_waitUntilEndOfQueue(1.0)
-							@queue.push(preferredResource)
+							@queue.push({song, resource: preferredResource})
+							listener("songPlaying", song) for listener in @_eventListeners
 							network.play(preferredResource)
 							lastSongStreamedNetwork = network
 							console.log("waiting 3")
@@ -66,6 +67,7 @@ class Model.SongFeedStream
 		if not @stopRequest
 			throw new Error("can only dispose after streaming was stopped")
 		network.removeListener(@_handleStreamingNetworkEvent) for network in @streamingNetworks
+		@_eventListeners = []
 			
 	_waitUntilEndOfQueue: (factor) ->
 		while @queue.length > 1
@@ -75,8 +77,8 @@ class Model.SongFeedStream
 			return
 		
 		console.debug("holding on.. until song nearly finished")
-		waitingResource = @queue[0]
-		while @queue.length == 1 and @queue[0] == waitingResource
+		waitingResource = @queue[0].resource
+		while @queue.length == 1 and @queue[0].resource == waitingResource
 			# periodic calculation because user could fast-forward, skip the song or 
 			# the length or position isn't available yet
 			length = waitingResource.length
@@ -93,12 +95,13 @@ class Model.SongFeedStream
 			hold(5000)
 		if @queue.length != 1
 			console.warn("queue length changed to #{@queue.length}")
-		if @queue > 0 and @queue[0] != waitingResource
+		if @queue > 0 and @queue[0].resource != waitingResource
 			console.warn("resource on which we are waiting for changed to #{@waitingResource}")
 	
 	_findAndAddSongResources: (song) ->
-		resources = (network.findSongResource(song.artist, song.title) for network in @streamingNetworks)
-		song.resources = resources.filter((resource) -> resource?)
+		if song.resources == null
+			resources = (network.findSongResource(song.artist, song.title) for network in @streamingNetworks)
+			song.resources = resources.filter((resource) -> resource?)
 		song.resources.length > 0
 		
 	_getPreferredResource: (resources, preferredNetwork) ->
@@ -116,17 +119,19 @@ class Model.SongFeedStream
 				matchingResource[0]
 		
 	# TODO
-	playedSongs: []  
-	isAlternativeSong: false
-	noSongFound: false
+#	isAlternativeSong: false
+#	noSongFound: false
 				
 	_handleStreamingNetworkEvent: (name, data) =>
-		if name == "streamingSkipped" and @queue[0] == data
-			console.log("song skipped, shifting")
+		if ["streamingSkipped", "streamingCompleted", "streamingFailed"].indexOf(name) != -1 and @queue[0].resource == data	
+			if name == "streamingSkipped"
+				console.log("song skipped, shifting")
+			else if name == "streamingCompleted"
+				console.log("song completed, shifting")
+			else if name == "streamingFailed"
+				console.log("song failed to play, shifting")
 			@queue.shift()
-		else if name == "streamingCompleted" and @queue[0] == data
-			console.log("song completed, shifting")
-			@queue.shift()
-		else if name == "streamingFailed" and @queue[0] == data
-			console.log("song failed to play, shifting")
-			@queue.shift()
+			if @queue.length > 0
+				listener("songPlaying", @queue[0].song) for listener in @_eventListeners
+			else
+				listener("nothingPlaying") for listener in @_eventListeners

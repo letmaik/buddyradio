@@ -30,6 +30,10 @@ class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 	constructor: (@songsPerFeedInARow = 1, @feeds...) ->
 		@_currentFeedIdx = 0
 		@_currentFeedSongsInARow = 0
+		@_eventListeners = []
+		
+	registerListener: (listener) ->
+		@_eventListeners.push(listener)
 		
 	hasOpenEnd: () ->
 		@feeds.some((feed) -> feed.hasOpenEnd())
@@ -39,21 +43,27 @@ class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 			return false
 		if @_currentFeedSongsInARow < @songsPerFeedInARow and @feeds[@_currentFeedIdx].hasNext()
 			return true
+		@_moveToNextFeed()
 		@_currentFeedSongsInARow = 0
 		startIdx = @_currentFeedIdx
 		while not @feeds[@_currentFeedIdx].hasNext()
-			@_currentFeedIdx =
-				if @_currentFeedIdx == @feeds.length - 1
-					0
-				else
-					@_currentFeedIdx + 1
+			@_moveToNextFeed()
 			if @_currentFeedIdx == startIdx
 				return false
 		true
 		
+	_moveToNextFeed: () ->
+		@_currentFeedIdx =
+			if @_currentFeedIdx == @feeds.length - 1
+				0
+			else
+				@_currentFeedIdx + 1
+		
 	next: () ->
 		@_currentFeedSongsInARow++
-		@feeds[@_currentFeedIdx].next()
+		song = @feeds[@_currentFeedIdx].next()
+		listener("nextSongReturned", {feed: @feeds[@_currentFeedIdx], song}) for listener in @_eventListeners
+		song
 		
 	addFeed: (feed) ->
 		@feeds.push(feed)

@@ -36,3 +36,6 @@ class Model.Buddy
 		else if name == "lastSongChanged"
 			@lastSong = data
 		listener(name, data) for listener in @_eventListeners
+		
+	toString: () ->
+		"Buddy[#{@network.name}:#{@username}]"
