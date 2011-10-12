@@ -9,31 +9,26 @@
 
 if (window.top != window.self)  // don't run on iframes
     return;
+	
+// TODO only execute if Grooveshark object available (takes some time!)
+// (or prevent it from running on http://grooveshark.com/upload etc.)
 
 var s = document.createElement("script");
 s.type = "text/javascript";
 s.src = "http://code.onilabs.com/apollo/0.13/oni-apollo.js";
-s.addEventListener("load", loadCoffeeOnDelay, false);
+s.addEventListener("load", loadRadioOnDelay, false);
 document.body.appendChild(s);
 
-function loadCoffeeOnDelay() {
-	setTimeout(loadCoffee, 666);
+function loadRadioOnDelay() {
+	setTimeout(loadRadio, 666);
 }
 
-function loadCoffee() {
-	unsafeWindow.require("github:onilabs/coffee-script/master/extras/coffee-script.js", {callback: coffeeLoaded});
-}
-
-function coffeeLoaded(err, module) {
-	if (err) throw ('error: ' + err);
-	
+function loadRadio() {	
 	var debugMultiLineHack = (<><![CDATA[
-#COFFEE#
+#SJS#
 	]]></>).toString();
 	
-	unsafeWindow.CScript = module.CoffeeScript;
-	unsafeWindow.CS = debugMultiLineHack;
-	var sjsSrc = module.CoffeeScript.compile(debugMultiLineHack);
+	var sjsSrc = debugMultiLineHack;
 	unsafeWindow.SJS = sjsSrc;
 	unsafeWindow.require("local:buddyradio", {callback: radioLoaded, src: sjsSrc});
 }

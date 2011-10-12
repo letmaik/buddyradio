@@ -67,6 +67,12 @@ class Model.Radio
 	isOnAir: (buddy) ->
 		buddy == @onAirBuddy
 	
+	getSongsPerFeedInARow: () ->
+		@_feedCombinator.songsPerFeedInARow
+	
+	setSongsPerFeedInARow: (count) ->
+		@_feedCombinator.songsPerFeedInARow = count
+	
 	_handleBuddyManagerEvent: (name, data) =>
 		if name == "buddyRemoved" and @isFeedEnabled(data)
 			@tuneOut(data, "buddyRemoved")

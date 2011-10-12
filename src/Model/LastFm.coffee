@@ -111,19 +111,21 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 				if cache?.status != "disabled"
 					@_notifyListeners(username, "statusChanged", "disabled")
 				@_buddyListeningCache[username] = {lastUpdate: Date.now(), status: "disabled", currentSong: null, pastSongs: []}
-				return
 			else
-				throw e
+				console.error(e)
+			return
 		tracks = response.track or []
 		currentSong = (
 			new Model.Song(
 				track.artist["#text"],
-				track.name
+				track.name,
+				track.album?["#text"]
 			) for track in tracks when track["@attr"]?.nowplaying)[0]
 		pastSongs = (
 			new Model.Song(
 				track.artist["#text"],
 				track.name,
+				track.album?["#text"],
 				track.date.uts
 			) for track in tracks when not track["@attr"]?.nowplaying)
 		status = if currentSong? then "live" else "off"

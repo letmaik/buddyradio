@@ -15,8 +15,9 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			throw new Error("Grooveshark API not available or has changed")
 		Grooveshark.setSongStatusCallback(@handleGroovesharkEvent)
 
-	findSongResource: (artist, title) ->
-		url = http.constructURL("http://buddyradioproxy.appspot.com/tinysong?artist=#{artist}&title=#{title}")
+	findSongResource: (artist, title, album = null) ->
+		albumParam = if album? then "&album=#{album}" else ""			
+		url = http.constructURL("http://buddyradioproxy.appspot.com/tinysong?artist=#{artist}&title=#{title}#{albumParam}")
 		response = http.json(url)
 		if response.SongID?
 			new Model.GroovesharkSongResource(response.SongID, @)

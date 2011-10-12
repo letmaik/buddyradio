@@ -19,3 +19,7 @@ class Controller.Radio
 	tune: (networkClassName, username) ->
 		if networkClassName and username
 			@radio.tune(@radio.buddyManager.getBuddy(networkClassName, username))
+			
+	setSongsPerFeedInARow: (count) ->
+		if count? and count > 0
+			@radio.setSongsPerFeedInARow(count)

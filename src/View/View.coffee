@@ -43,6 +43,24 @@ class View.BuddySidebarSection
 	init: () ->
 		$("head").append("""
 		<style type="text/css">
+			#sidebar_buddyradio_wrapper .divider .sidebarHeading a {
+				display: none;
+			}
+			#sidebar_buddyradio_wrapper .divider:hover .sidebarHeading a {
+				display: inline;
+			}
+			.buddyradio_overlay {
+				background: none repeat scroll 0 0 #FFFFFF;
+				border: 1px solid rgba(0, 0, 0, 0.25);
+				border-radius: 3px 3px 3px 3px;
+				padding: 5px;
+				color: black;
+				max-height: 325px;
+				overflow-x: hidden;
+				overflow-y: auto;
+				position: absolute;
+				z-index: 9999;
+			}
 			.sidebar_buddy a .icon {
 				/* Some icons by Yusuke Kamiyamane. All rights reserved. Licensed under Creative Commons Attribution 3.0. */
 				background: url(data:image/png;base64,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)
@@ -98,7 +116,9 @@ class View.BuddySidebarSection
 		$("#sidebar .container_inner").append("""
 		<div id="sidebar_buddyradio_wrapper" class="listWrapper">
             <div class="divider" style="display: block;">
-                <span class="sidebarHeading">Buddy Radio</span>
+                <span class="sidebarHeading">Buddy Radio
+					<a id="buddyradio_settingsLink">&gt; Settings</a>
+				</span>
                 <a class="sidebarNew"><span>Add Buddy</span></a>
             </div>
             <ul id="sidebar_buddyradio" class="link_group">
@@ -116,11 +136,11 @@ class View.BuddySidebarSection
 				
 			position = newButton.offset()
 			$("body").append("""
-			<div id="buddyradio_newuserform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 220px; height:40px" class="jjmenu sidebarmenu jjsidebarMenuNew bottomOriented">
+			<div id="buddyradio_newuserform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 220px; height:40px" class="jjmenu">
 				<div class="jj_menu_item">
 					<div style="width: 100px;float:left" class="input_wrapper">
 						<div class="cap">
-							<input type="text" id="buddyradio_newuser" name="buddy"> 
+							<input type="text" id="buddyradio_newuser" name="buddy" /> 
 						</div>
 					</div>
 					<button id="buddyradio_adduserbutton" type="button" class="btn_style1" style="margin: 4px 0 0 5px">
@@ -138,6 +158,41 @@ class View.BuddySidebarSection
 			$("#buddyradio_newuser").keydown((event) =>
 				if event.which == 13
 					onConfirm()
+			)
+		)
+		$("#buddyradio_settingsLink").click( () =>
+			if $("#buddyradio_settingsform").length == 1
+				$("#buddyradio_settingsform").remove()
+				return
+				
+			position = newButton.offset()
+			songsPerFeedInARow = @radio.getSongsPerFeedInARow()
+			songsPerFeedInARowValues = [1,2,3,4,5,10,15,20,30,40,50,100]
+			options = songsPerFeedInARowValues.map((n) ->
+				sel = if songsPerFeedInARow == n then " selected" else ""
+				"<option value=\"#{n}\"#{sel}>#{n}</option>"
+			).join()
+			
+			$("body").append("""
+			<div id="buddyradio_settingsform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 300px; height:60px" class="buddyradio_overlay">
+				<div>
+					Play 
+					<select name="songsPerFeedInARow">
+						#{options}
+					</select>
+					song/s in a row from same buddy
+				</div>
+				<div style="padding-top:10px">
+					<button type="button" class="btn_style1">
+						<span>Apply</span>
+					</button>					
+				</div>
+			</div>
+			""")
+			$("#buddyradio_settingsform button").click(() =>
+				count = $("#buddyradio_settingsform select[name=songsPerFeedInARow]")[0].value
+				@controller.setSongsPerFeedInARow(parseInt(count))
+				$("#buddyradio_settingsform").remove()
 			)
 		)
 	refresh: () ->

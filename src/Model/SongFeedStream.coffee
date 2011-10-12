@@ -100,7 +100,7 @@ class Model.SongFeedStream
 	
 	_findAndAddSongResources: (song) ->
 		if song.resources == null
-			resources = (network.findSongResource(song.artist, song.title) for network in @streamingNetworks)
+			resources = (network.findSongResource(song.artist, song.title, song.album) for network in @streamingNetworks)
 			song.resources = resources.filter((resource) -> resource?)
 		song.resources.length > 0
 		
