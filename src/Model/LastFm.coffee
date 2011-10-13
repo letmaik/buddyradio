@@ -33,6 +33,15 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	_throwIfInvalid: (username) ->
 		if not @isValid(username)
 			throw new Error("#{username} not existing on Last.fm")
+			
+	getBuddies: (username) ->
+		try
+			friends = LastFmApi.get({ method: "user.getFriends", user: username}).user
+			return friends.map((friend) -> friend.name)
+		catch e	
+			if e.code == 6
+				return { error: "invalid_user" }
+			return { error: "unknown_error" }
 	
 	getInfo: (username) ->
 		user = username.toLowerCase()
@@ -219,18 +228,29 @@ class Model.LastFmLiveSongFeed extends Model.LastFmSongFeed
 		if songsToCheck.length == 0
 			return
 		
+		# only check 5 songs max for both old AND new songs
+		# (compromise between not missing too much songs (when paused etc.) and be able to handle repeated album plays)
+		# with max 5, when repeating an album, problems can occur if album length < 10
+		# if album length <= 5, then those songs will be ignored because the algorithm detects them as already played
+		# if 5 < album length < 10, it depends on how many songs were missed
+		#  e.g. if length = 7, then max. 2 songs can be missed without problems
+		#       if length = 9, then max. 4 songs can be missed without problems
+		#  -> if more songs were missed and it's still the repeated album, then those new songs will be ignored
+		#  -> could be circumvented by introducing 1-song delay (so that timestamps can be considered)
+		#     -> TODO implement as option?
+		# (currently playing song doesn't have a timestamp (=primary key) in last.fm's listening history)
+		# (if it would have a timestamp, then it also would have to be identical when the song lands in the pastSongs)
+		if songsToCheck.length > 5
+			songsToCheck = songsToCheck[songsToCheck.length-5..]
+		
 		# don't check all old songs
 		oldIdxPart = @_songs.length - 1 - songsToCheck.length
 		oldIdx = if oldIdxPart > 0 then oldIdxPart else 0
 		newIdx = 0
 		console.debug("songsToCheck: #{songsToCheck}")
 		console.debug("_songs: #{@_songs}")
+
 		# find starting position of new songs
-		# note: if the same songs are repeatedly played exactly in same order and there was a longer pause 
-		#       where the user didn't fetch new songs then this algorithm might not find new songs
-		#       because it'd think that nothing changed (probably very rare)
-		#  -> could be circumvented by introducing 1-song delay (so that timestamps can be considered)
-		# (currently playing song doesn't have a timestamp (=primary key) in last.fm's listening history)
 		while oldIdx < @_songs.length and newIdx != songsToCheck.length
 			console.debug("pre-loop: oldIdx: #{oldIdx}, newIdx: #{newIdx}")
 			previousNewIdx = newIdx

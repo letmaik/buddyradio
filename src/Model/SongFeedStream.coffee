@@ -32,7 +32,6 @@ class Model.SongFeedStream
 						continue
 					else
 						console.info("end of feed, all available songs streamed")
-						# TODO inform listeners
 						return { status: "endOfFeed" }
 				else
 					song = @songFeed.next()

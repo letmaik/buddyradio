@@ -1,5 +1,7 @@
 # TODO all internal maps of type username -> .. will fail if more buddy networks are supported and
 #      a user with same username is added in two networks
+#      solution: use real maps (http://stackoverflow.com/questions/368280/javascript-hashmap-equivalent/383540#383540)
+#                e.g. map Buddy -> SongFeed
 
 # WONTFIX if a user's radio is switched on and off quickly some times, then identical songs get added/played in Grooveshark
 #      -> not easily possible with Grooveshark's limited queue API
@@ -14,10 +16,14 @@ class Model.Radio
 		@_feedEnabledBuddies = {} # map username -> SongFeed
 		@_feedCombinator = new Model.AlternatingSongFeedCombinator()
 		@_feedCombinator.registerListener(@_handleFeedCombinatorEvent)
-		# TODO must be cleaned up now and then
-		#      -> be careful: unselected users can still finish their song, so don't delete as soon as feed removed!
+		# TODO clean up now and then (problem: when?)
+		#      -> not when "nothingPlaying" received, doesn't work if networks only support play()
+		#         because between songs this event will occur!
 		@_feededSongs = {} # map username -> [songs]
 		@onAirBuddy = null
+		@loadSettings()
+		
+	_settingsStorageKey: "buddyRadio_Settings"
 		
 	tune: (buddy) ->
 		if @isFeedEnabled(buddy)
@@ -72,6 +78,16 @@ class Model.Radio
 	
 	setSongsPerFeedInARow: (count) ->
 		@_feedCombinator.songsPerFeedInARow = count
+		@saveSettings()
+		
+	loadSettings: () ->
+		settings = JSON.parse(localStorage[@_settingsStorageKey] or "{}")
+		if settings.hasOwnProperty("songsPerFeedInARow")
+			@setSongsPerFeedInARow(settings.songsPerFeedInARow)
+	
+	saveSettings: () ->
+		settings = {songsPerFeedInARow: @getSongsPerFeedInARow()}
+		localStorage[@_settingsStorageKey] = JSON.stringify(settings)
 	
 	_handleBuddyManagerEvent: (name, data) =>
 		if name == "buddyRemoved" and @isFeedEnabled(data)

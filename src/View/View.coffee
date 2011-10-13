@@ -1,8 +1,5 @@
 View = {}
 
-# TODO Feature idea: make the orange station icon glow when a song from the particular buddy is played
-#      -> this is esp. useful when multiple buddies are listened to
-
 class View.BuddySidebarSection
 	constructor: (@radio, @controller) ->
 		@radio.registerListener(@handleRadioEvent)
@@ -24,8 +21,15 @@ class View.BuddySidebarSection
 		if name == "tunedOut" and data.reason == "disabled"
 			alert("Radio for #{data.buddy.username} was stopped because the user has disabled access to his song listening data.")
 	
+	handleBuddyManagerEvent: (name, data) =>
+		if ["buddyRemoved", "buddyAdded", "statusChanged", "lastSongChanged", "buddiesLoaded"].indexOf(name) != -1
+			@refresh()
+		if name == "buddyNotAdded"
+			if data.reason == "notFound"
+				alert("The buddy with username #{data.username} couldn't be found.")
+	
 	_applyStyle: (buddy) ->
-		if buddy == null
+		if not buddy
 			return
 		el = $("li.sidebar_buddy[rel='#{buddy.network.className}-#{buddy.username}']")
 		el.removeClass("buddy_nowplaying buddy_feedenabled buddy_live buddy_off buddy_disabled")
@@ -35,10 +39,6 @@ class View.BuddySidebarSection
 		if @radio.isOnAir(buddy)
 			classes += " buddy_nowplaying"
 		el.addClass(classes)
-		
-	handleBuddyManagerEvent: (name, data) =>
-		if ["buddyRemoved", "buddyAdded", "statusChanged", "lastSongChanged", "buddiesLoaded"].indexOf(name) != -1
-			@refresh()	
 		
 	init: () ->
 		$("head").append("""
@@ -136,7 +136,7 @@ class View.BuddySidebarSection
 				
 			position = newButton.offset()
 			$("body").append("""
-			<div id="buddyradio_newuserform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 220px; height:40px" class="jjmenu">
+			<div id="buddyradio_newuserform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 255px; height: 80px;" class="jjmenu">
 				<div class="jj_menu_item">
 					<div style="width: 100px;float:left" class="input_wrapper">
 						<div class="cap">
@@ -146,18 +146,40 @@ class View.BuddySidebarSection
 					<button id="buddyradio_adduserbutton" type="button" class="btn_style1" style="margin: 4px 0 0 5px">
 						<span>Add Last.fm Buddy</span>
 					</button>
+				</div>
+				<div class="jj_menu_item" style="clear:both">
+					<div class="input_wrapper" style="width: 100px; float: left;">
+						<div class="cap">
+							<input type="text" name="buddy" id="buddyradio_importusers"> 
+						</div>
+					</div>
+					<button style="margin: 4px 0pt 0pt 5px;" class="btn_style1" type="button" id="buddyradio_importusersbutton">
+						<span>Import my Last.fm Buddies</span>
+					</button>
 					
 				</div>
 			</div>
 			""")
 			$("#buddyradio_newuser").focus()
-			onConfirm = () =>
+			onConfirmAddBuddy = () =>
+				$("#buddyradio_adduserbutton span").html("Adding Buddy...")
 				@controller.addBuddy("Model.LastFmBuddyNetwork", $("#buddyradio_newuser")[0].value)
 				$("#buddyradio_newuserform").remove()
-			$("#buddyradio_adduserbutton").click(onConfirm)
+			$("#buddyradio_adduserbutton").click(onConfirmAddBuddy)
 			$("#buddyradio_newuser").keydown((event) =>
 				if event.which == 13
-					onConfirm()
+					onConfirmAddBuddy()
+			)
+			onConfirmImportBuddies = () =>
+				$("#buddyradio_importusersbutton span").html("Importing Buddies...")
+				result = @controller.importBuddies("Model.LastFmBuddyNetwork", $("#buddyradio_importusers")[0].value)
+				if result.error == "invalid_user"
+					alert("The user name you entered doesn't exist on Last.fm!")
+				$("#buddyradio_newuserform").remove()
+			$("#buddyradio_importusersbutton").click(onConfirmImportBuddies)
+			$("#buddyradio_importusers").keydown((event) =>
+				if event.which == 13
+					onConfirmImportBuddies()
 			)
 		)
 		$("#buddyradio_settingsLink").click( () =>

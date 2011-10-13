@@ -34,24 +34,35 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 	currentSongShouldHaveStartedAt = null # timestamp
 	lastFailedSongResource = null
 	
-	# TODO play() doesn't have re-try functionality in case the song couldn't be added via .addSongsByID()
-	play: (songResource) ->
+	play: (songResource, dontRetry = false) ->
 		console.debug("playing... Grooveshark songID #{songResource.songId}")
 		Grooveshark.addSongsByID([songResource.songId])
-		# skip songs which are in the queue
-		waitfor
-			while Grooveshark.getCurrentSongStatus().song?.songID != songResource.songId
-				console.debug("skipping to next song to get to the current one")
-				Grooveshark.next()
-				hold(1000)
-		else
-			hold(10000)
-			console.error("couldn't skip to current song in Grooveshark player, informing listeners")
-			listener("streamingSkipped", songResource) for listener in @eventListeners
-			return
+		if not @_skipTo(songResource.songId)
+			if dontRetry
+				listener("streamingSkipped", songResource) for listener in @eventListeners
+				return
+			console.info("trying to add song one more time...")
+			Grooveshark.addSongsByID([songResource.songId])
+			if not @_skipTo(songResource.songId)
+				console.error("nope, still not working... skipping this song now")
+				listener("streamingSkipped", songResource) for listener in @eventListeners
+				return
 		@currentSongShouldHaveStartedAt = Date.now()
 		@queuedSongResources.push(songResource)
 		@_playIfPaused()
+	
+	# skip songs which are in the queue
+	_skipTo: (songId) ->
+		waitfor
+			while Grooveshark.getCurrentSongStatus().song?.songID != songId
+				console.debug("skipping to next song to get to the current one")
+				Grooveshark.next()
+				hold(1000)
+			return true
+		else
+			hold(10000)
+			console.warn("couldn't skip to current song in Grooveshark player")
+			return false
 		
 	enqueue: (songResource) ->
 		@queuedSongResources.push(songResource)
@@ -78,7 +89,7 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		# sometimes grooveshark doesn't add and play a song when calling addSongsByID()
 		# this leaves our queue in an inconsistent state so we have to clean it up now and then
 		if @queuedSongResources.length > 0 and
-		   @queuedSongResources[0].length == null # length is taken as an indicator that the song was never played
+		   @queuedSongResources[0].length == null # null length is taken as an indicator that the song was never played
 			if (Date.now() - @currentSongShouldHaveStartedAt) > 10000
 				console.warn("grooveshark got stuck... trying to re-add current song")
 				resource = @queuedSongResources.shift()
@@ -87,7 +98,7 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 				# then remove it first, so that skipping logic in play() works when adding the song again
 				if Grooveshark.getCurrentSongStatus().song?.songID == resource.songId
 					Grooveshark.removeCurrentSongFromQueue()
-				@play(resource)
+				@play(resource, true)
 				@currentSongShouldHaveStartedAt = oldDate
 			else if (Date.now() - @currentSongShouldHaveStartedAt) > 25000
 				console.warn("grooveshark got stuck... giving up. skipping song and fixing queue")
@@ -148,5 +159,5 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			else
 				resource = @queuedSongResources.shift()
 				@lastFailedSongResource = resource
-				@play(resource)
+				@play(resource, true)
 		

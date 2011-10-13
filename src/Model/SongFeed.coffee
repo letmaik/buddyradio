@@ -43,13 +43,15 @@ class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 			return false
 		if @_currentFeedSongsInARow < @songsPerFeedInARow and @feeds[@_currentFeedIdx].hasNext()
 			return true
+		oldFeedIdx = @_currentFeedIdx
 		@_moveToNextFeed()
-		@_currentFeedSongsInARow = 0
 		startIdx = @_currentFeedIdx
 		while not @feeds[@_currentFeedIdx].hasNext()
 			@_moveToNextFeed()
 			if @_currentFeedIdx == startIdx
 				return false
+		if oldFeedIdx != @_currentFeedIdx
+			@_currentFeedSongsInARow = 0
 		true
 		
 	_moveToNextFeed: () ->

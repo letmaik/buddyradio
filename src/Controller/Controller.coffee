@@ -15,6 +15,10 @@ class Controller.Radio
 	removeBuddy: (networkClassName, username) ->
 		if networkClassName and username
 			@radio.buddyManager.removeBuddy(@radio.buddyManager.getBuddy(networkClassName, username))
+			
+	importBuddies: (networkClassName, username) ->
+		if networkClassName and username
+			@radio.buddyManager.importBuddies(networkClassName, username)
 		
 	tune: (networkClassName, username) ->
 		if networkClassName and username

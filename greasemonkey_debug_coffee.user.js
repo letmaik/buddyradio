@@ -6,7 +6,6 @@
 // @include       http://grooveshark.com/*
 // ==/UserScript==
 
-
 if (window.top != window.self)  // don't run on iframes
     return;
 	
@@ -117,7 +116,7 @@ class Model.BuddyManager
 	getBuddy: (buddyNetworkClassName, username) ->
 		@buddies.filter((buddy) -> buddy.network.className == buddyNetworkClassName and buddy.username == username)[0]
 	
-	addBuddy: (buddyNetworkClassName, username) ->
+	addBuddy: (buddyNetworkClassName, username, dontSave = false) ->
 		if @buddies.some((buddy) -> buddy.network.className == buddyNetworkClassName and buddy.username == username)
 			console.debug("user #{username} is already added")
 			return
@@ -128,12 +127,13 @@ class Model.BuddyManager
 			buddy = new Model.Buddy(network, username)
 			buddy.registerListener((name, data) => @_handleBuddyEvent(buddy, name, data))
 			@buddies.push(buddy)
-			@saveLocal()
+			if not dontSave
+				@saveLocal()
 			console.info("user #{username} added, informing listeners")
 			listener("buddyAdded", buddy) for listener in @eventListeners
 		else
 			console.info("user #{username} not found")
-			# TODO maybe inform listeners
+			listener("buddyNotAdded", {username, reason: "notFound"}) for listener in @eventListeners
 			
 	removeBuddy: (buddyToBeRemoved) ->
 		@buddies = @buddies.filter((buddy) -> buddy != buddyToBeRemoved)
@@ -141,15 +141,29 @@ class Model.BuddyManager
 		@saveLocal()
 		console.info("user #{buddyToBeRemoved.username} removed, informing listeners")
 		listener("buddyRemoved", buddyToBeRemoved) for listener in @eventListeners
-					
+		
+	importBuddies: (buddyNetworkClassName, username) ->
+		network = @_findBuddyNetwork(buddyNetworkClassName)
+		buddies = network.getBuddies(username)
+		if buddies.error
+			buddies
+		else
+			@addBuddy(buddyNetworkClassName, username, true) for username in buddies
+			@saveLocal()
+			true
+		
 	saveLocal: () -> 
+		console.debug("saving buddies")
 		reducedBuddies = ([buddy.network.className, buddy.username] for buddy in @buddies)
 		localStorage[@storageKey] = JSON.stringify(reducedBuddies)
 		listener("buddiesSaved") for listener in @eventListeners
-		
+	
+	
+	# TODO don't delete a buddy just because network failed (check for real not-found error!)
 	loadLocal: () ->
 		reducedBuddies = JSON.parse(localStorage[@storageKey] or "[]")
-		@addBuddy(reducedBuddy[0], reducedBuddy[1]) for reducedBuddy in reducedBuddies
+		@addBuddy(reducedBuddy[0], reducedBuddy[1], true) for reducedBuddy in reducedBuddies
+		@saveLocal()
 		listener("buddiesLoaded") for listener in @eventListeners
 	
 	registerListener: (listener) ->
@@ -162,6 +176,7 @@ class Model.BuddyManager
 	_findBuddyNetwork: (networkClassName) ->
 		@buddyNetworks.filter((network) -> network.className == networkClassName)[0]
 # only a buddy gets a network and uses it (no one else calls it's methods!)
+# exception: getBuddies() is called from BuddyManager to import existing buddies/friends
 class Model.BuddyNetwork
 	name: "Network Name" # used in links etc.
 	className: "Model.XYZBuddyNetwork"
@@ -171,10 +186,13 @@ class Model.BuddyNetwork
 	getLastSong: (buddyId) -> throw EOVR
 	getLiveFeed: (buddyId) -> throw EOVR
 	# getHistoricFeed: (buddyId, fromTime, toTime) - implement in sub class if supported
+	getBuddies: (buddyId) -> throw EOVR # returns array of buddyId's
 	registerListener: (listener, buddyId) -> throw EOVR
 	removeListener: (listener, buddyId) -> throw EOVR
 # TODO all internal maps of type username -> .. will fail if more buddy networks are supported and
 #      a user with same username is added in two networks
+#      solution: use real maps (http://stackoverflow.com/questions/368280/javascript-hashmap-equivalent/383540#383540)
+#                e.g. map Buddy -> SongFeed
 
 # WONTFIX if a user's radio is switched on and off quickly some times, then identical songs get added/played in Grooveshark
 #      -> not easily possible with Grooveshark's limited queue API
@@ -189,10 +207,14 @@ class Model.Radio
 		@_feedEnabledBuddies = {} # map username -> SongFeed
 		@_feedCombinator = new Model.AlternatingSongFeedCombinator()
 		@_feedCombinator.registerListener(@_handleFeedCombinatorEvent)
-		# TODO must be cleaned up now and then
-		#      -> be careful: unselected users can still finish their song, so don't delete as soon as feed removed!
+		# TODO clean up now and then (problem: when?)
+		#      -> not when "nothingPlaying" received, doesn't work if networks only support play()
+		#         because between songs this event will occur!
 		@_feededSongs = {} # map username -> [songs]
 		@onAirBuddy = null
+		@loadSettings()
+		
+	_settingsStorageKey: "buddyRadio_Settings"
 		
 	tune: (buddy) ->
 		if @isFeedEnabled(buddy)
@@ -247,6 +269,16 @@ class Model.Radio
 	
 	setSongsPerFeedInARow: (count) ->
 		@_feedCombinator.songsPerFeedInARow = count
+		@saveSettings()
+		
+	loadSettings: () ->
+		settings = JSON.parse(localStorage[@_settingsStorageKey] or "{}")
+		if settings.hasOwnProperty("songsPerFeedInARow")
+			@setSongsPerFeedInARow(settings.songsPerFeedInARow)
+	
+	saveSettings: () ->
+		settings = {songsPerFeedInARow: @getSongsPerFeedInARow()}
+		localStorage[@_settingsStorageKey] = JSON.stringify(settings)
 	
 	_handleBuddyManagerEvent: (name, data) =>
 		if name == "buddyRemoved" and @isFeedEnabled(data)
@@ -340,13 +372,15 @@ class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 			return false
 		if @_currentFeedSongsInARow < @songsPerFeedInARow and @feeds[@_currentFeedIdx].hasNext()
 			return true
+		oldFeedIdx = @_currentFeedIdx
 		@_moveToNextFeed()
-		@_currentFeedSongsInARow = 0
 		startIdx = @_currentFeedIdx
 		while not @feeds[@_currentFeedIdx].hasNext()
 			@_moveToNextFeed()
 			if @_currentFeedIdx == startIdx
 				return false
+		if oldFeedIdx != @_currentFeedIdx
+			@_currentFeedSongsInARow = 0
 		true
 		
 	_moveToNextFeed: () ->
@@ -407,7 +441,6 @@ class Model.SongFeedStream
 						continue
 					else
 						console.info("end of feed, all available songs streamed")
-						# TODO inform listeners
 						return { status: "endOfFeed" }
 				else
 					song = @songFeed.next()
@@ -561,24 +594,35 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 	currentSongShouldHaveStartedAt = null # timestamp
 	lastFailedSongResource = null
 	
-	# TODO play() doesn't have re-try functionality in case the song couldn't be added via .addSongsByID()
-	play: (songResource) ->
+	play: (songResource, dontRetry = false) ->
 		console.debug("playing... Grooveshark songID #{songResource.songId}")
 		Grooveshark.addSongsByID([songResource.songId])
-		# skip songs which are in the queue
-		waitfor
-			while Grooveshark.getCurrentSongStatus().song?.songID != songResource.songId
-				console.debug("skipping to next song to get to the current one")
-				Grooveshark.next()
-				hold(1000)
-		else
-			hold(10000)
-			console.error("couldn't skip to current song in Grooveshark player, informing listeners")
-			listener("streamingSkipped", songResource) for listener in @eventListeners
-			return
+		if not @_skipTo(songResource.songId)
+			if dontRetry
+				listener("streamingSkipped", songResource) for listener in @eventListeners
+				return
+			console.info("trying to add song one more time...")
+			Grooveshark.addSongsByID([songResource.songId])
+			if not @_skipTo(songResource.songId)
+				console.error("nope, still not working... skipping this song now")
+				listener("streamingSkipped", songResource) for listener in @eventListeners
+				return
 		@currentSongShouldHaveStartedAt = Date.now()
 		@queuedSongResources.push(songResource)
 		@_playIfPaused()
+	
+	# skip songs which are in the queue
+	_skipTo: (songId) ->
+		waitfor
+			while Grooveshark.getCurrentSongStatus().song?.songID != songId
+				console.debug("skipping to next song to get to the current one")
+				Grooveshark.next()
+				hold(1000)
+			return true
+		else
+			hold(10000)
+			console.warn("couldn't skip to current song in Grooveshark player")
+			return false
 		
 	enqueue: (songResource) ->
 		@queuedSongResources.push(songResource)
@@ -605,7 +649,7 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		# sometimes grooveshark doesn't add and play a song when calling addSongsByID()
 		# this leaves our queue in an inconsistent state so we have to clean it up now and then
 		if @queuedSongResources.length > 0 and
-		   @queuedSongResources[0].length == null # length is taken as an indicator that the song was never played
+		   @queuedSongResources[0].length == null # null length is taken as an indicator that the song was never played
 			if (Date.now() - @currentSongShouldHaveStartedAt) > 10000
 				console.warn("grooveshark got stuck... trying to re-add current song")
 				resource = @queuedSongResources.shift()
@@ -614,7 +658,7 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 				# then remove it first, so that skipping logic in play() works when adding the song again
 				if Grooveshark.getCurrentSongStatus().song?.songID == resource.songId
 					Grooveshark.removeCurrentSongFromQueue()
-				@play(resource)
+				@play(resource, true)
 				@currentSongShouldHaveStartedAt = oldDate
 			else if (Date.now() - @currentSongShouldHaveStartedAt) > 25000
 				console.warn("grooveshark got stuck... giving up. skipping song and fixing queue")
@@ -675,7 +719,7 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			else
 				resource = @queuedSongResources.shift()
 				@lastFailedSongResource = resource
-				@play(resource)
+				@play(resource, true)
 		
 class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	name: "Last.fm"
@@ -712,6 +756,15 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	_throwIfInvalid: (username) ->
 		if not @isValid(username)
 			throw new Error("#{username} not existing on Last.fm")
+			
+	getBuddies: (username) ->
+		try
+			friends = LastFmApi.get({ method: "user.getFriends", user: username}).user
+			return friends.map((friend) -> friend.name)
+		catch e	
+			if e.code == 6
+				return { error: "invalid_user" }
+			return { error: "unknown_error" }
 	
 	getInfo: (username) ->
 		user = username.toLowerCase()
@@ -898,18 +951,29 @@ class Model.LastFmLiveSongFeed extends Model.LastFmSongFeed
 		if songsToCheck.length == 0
 			return
 		
+		# only check 5 songs max for both old AND new songs
+		# (compromise between not missing too much songs (when paused etc.) and be able to handle repeated album plays)
+		# with max 5, when repeating an album, problems can occur if album length < 10
+		# if album length <= 5, then those songs will be ignored because the algorithm detects them as already played
+		# if 5 < album length < 10, it depends on how many songs were missed
+		#  e.g. if length = 7, then max. 2 songs can be missed without problems
+		#       if length = 9, then max. 4 songs can be missed without problems
+		#  -> if more songs were missed and it's still the repeated album, then those new songs will be ignored
+		#  -> could be circumvented by introducing 1-song delay (so that timestamps can be considered)
+		#     -> TODO implement as option?
+		# (currently playing song doesn't have a timestamp (=primary key) in last.fm's listening history)
+		# (if it would have a timestamp, then it also would have to be identical when the song lands in the pastSongs)
+		if songsToCheck.length > 5
+			songsToCheck = songsToCheck[songsToCheck.length-5..]
+		
 		# don't check all old songs
 		oldIdxPart = @_songs.length - 1 - songsToCheck.length
 		oldIdx = if oldIdxPart > 0 then oldIdxPart else 0
 		newIdx = 0
 		console.debug("songsToCheck: #{songsToCheck}")
 		console.debug("_songs: #{@_songs}")
+
 		# find starting position of new songs
-		# note: if the same songs are repeatedly played exactly in same order and there was a longer pause 
-		#       where the user didn't fetch new songs then this algorithm might not find new songs
-		#       because it'd think that nothing changed (probably very rare)
-		#  -> could be circumvented by introducing 1-song delay (so that timestamps can be considered)
-		# (currently playing song doesn't have a timestamp (=primary key) in last.fm's listening history)
 		while oldIdx < @_songs.length and newIdx != songsToCheck.length
 			console.debug("pre-loop: oldIdx: #{oldIdx}, newIdx: #{newIdx}")
 			previousNewIdx = newIdx
@@ -980,9 +1044,6 @@ class Model.LastFmHistoricSongFeed extends Model.LastFmSongFeed
 		response
 View = {}
 
-# TODO Feature idea: make the orange station icon glow when a song from the particular buddy is played
-#      -> this is esp. useful when multiple buddies are listened to
-
 class View.BuddySidebarSection
 	constructor: (@radio, @controller) ->
 		@radio.registerListener(@handleRadioEvent)
@@ -1004,8 +1065,15 @@ class View.BuddySidebarSection
 		if name == "tunedOut" and data.reason == "disabled"
 			alert("Radio for #{data.buddy.username} was stopped because the user has disabled access to his song listening data.")
 	
+	handleBuddyManagerEvent: (name, data) =>
+		if ["buddyRemoved", "buddyAdded", "statusChanged", "lastSongChanged", "buddiesLoaded"].indexOf(name) != -1
+			@refresh()
+		if name == "buddyNotAdded"
+			if data.reason == "notFound"
+				alert("The buddy with username #{data.username} couldn't be found.")
+	
 	_applyStyle: (buddy) ->
-		if buddy == null
+		if not buddy
 			return
 		el = $("li.sidebar_buddy[rel='#{buddy.network.className}-#{buddy.username}']")
 		el.removeClass("buddy_nowplaying buddy_feedenabled buddy_live buddy_off buddy_disabled")
@@ -1015,10 +1083,6 @@ class View.BuddySidebarSection
 		if @radio.isOnAir(buddy)
 			classes += " buddy_nowplaying"
 		el.addClass(classes)
-		
-	handleBuddyManagerEvent: (name, data) =>
-		if ["buddyRemoved", "buddyAdded", "statusChanged", "lastSongChanged", "buddiesLoaded"].indexOf(name) != -1
-			@refresh()	
 		
 	init: () ->
 		$("head").append("""
@@ -1116,7 +1180,7 @@ class View.BuddySidebarSection
 				
 			position = newButton.offset()
 			$("body").append("""
-			<div id="buddyradio_newuserform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 220px; height:40px" class="jjmenu">
+			<div id="buddyradio_newuserform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 255px; height: 80px;" class="jjmenu">
 				<div class="jj_menu_item">
 					<div style="width: 100px;float:left" class="input_wrapper">
 						<div class="cap">
@@ -1126,18 +1190,40 @@ class View.BuddySidebarSection
 					<button id="buddyradio_adduserbutton" type="button" class="btn_style1" style="margin: 4px 0 0 5px">
 						<span>Add Last.fm Buddy</span>
 					</button>
+				</div>
+				<div class="jj_menu_item" style="clear:both">
+					<div class="input_wrapper" style="width: 100px; float: left;">
+						<div class="cap">
+							<input type="text" name="buddy" id="buddyradio_importusers"> 
+						</div>
+					</div>
+					<button style="margin: 4px 0pt 0pt 5px;" class="btn_style1" type="button" id="buddyradio_importusersbutton">
+						<span>Import my Last.fm Buddies</span>
+					</button>
 					
 				</div>
 			</div>
 			""")
 			$("#buddyradio_newuser").focus()
-			onConfirm = () =>
+			onConfirmAddBuddy = () =>
+				$("#buddyradio_adduserbutton span").html("Adding Buddy...")
 				@controller.addBuddy("Model.LastFmBuddyNetwork", $("#buddyradio_newuser")[0].value)
 				$("#buddyradio_newuserform").remove()
-			$("#buddyradio_adduserbutton").click(onConfirm)
+			$("#buddyradio_adduserbutton").click(onConfirmAddBuddy)
 			$("#buddyradio_newuser").keydown((event) =>
 				if event.which == 13
-					onConfirm()
+					onConfirmAddBuddy()
+			)
+			onConfirmImportBuddies = () =>
+				$("#buddyradio_importusersbutton span").html("Importing Buddies...")
+				result = @controller.importBuddies("Model.LastFmBuddyNetwork", $("#buddyradio_importusers")[0].value)
+				if result.error == "invalid_user"
+					alert("The user name you entered doesn't exist on Last.fm!")
+				$("#buddyradio_newuserform").remove()
+			$("#buddyradio_importusersbutton").click(onConfirmImportBuddies)
+			$("#buddyradio_importusers").keydown((event) =>
+				if event.which == 13
+					onConfirmImportBuddies()
 			)
 		)
 		$("#buddyradio_settingsLink").click( () =>
@@ -1240,6 +1326,10 @@ class Controller.Radio
 	removeBuddy: (networkClassName, username) ->
 		if networkClassName and username
 			@radio.buddyManager.removeBuddy(@radio.buddyManager.getBuddy(networkClassName, username))
+			
+	importBuddies: (networkClassName, username) ->
+		if networkClassName and username
+			@radio.buddyManager.importBuddies(networkClassName, username)
 		
 	tune: (networkClassName, username) ->
 		if networkClassName and username
@@ -1261,4 +1351,3 @@ function radioLoaded(err, module) {
 	if (err) alert(err); //throw new Error('error: ' + err);
 	module.start();
 }
-

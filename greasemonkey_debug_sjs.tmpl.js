@@ -6,7 +6,6 @@
 // @include       http://grooveshark.com/*
 // ==/UserScript==
 
-
 if (window.top != window.self)  // don't run on iframes
     return;
 	
@@ -37,4 +36,3 @@ function radioLoaded(err, module) {
 	if (err) alert(err); //throw new Error('error: ' + err);
 	module.start();
 }
-
