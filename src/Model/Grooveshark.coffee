@@ -11,8 +11,15 @@ class Model.GroovesharkSongResource extends Model.SongResource
 class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 	constructor: () ->
 		super()
+		waitfor
+			while not Grooveshark?
+				console.debug("Grooveshark JS API not available yet, waiting...")
+				hold(500)
+		else
+			hold(10000)
+			throw new Error("Grooveshark JS API not available")
 		if not (Grooveshark.addSongsByID? and Grooveshark.setSongStatusCallback? and Grooveshark.pause? and Grooveshark.removeCurrentSongFromQueue?)
-			throw new Error("Grooveshark API not available or has changed")
+			throw new Error("Grooveshark API has changed")
 		Grooveshark.setSongStatusCallback(@handleGroovesharkEvent)
 
 	findSongResource: (artist, title, album = null) ->
@@ -31,8 +38,11 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		songResource instanceof Model.GroovesharkSongResource
 			
 	queuedSongResources: []
-	currentSongShouldHaveStartedAt = null # timestamp
-	lastFailedSongResource = null
+	
+	# used for detecting enqueue failures (play()-failures get detected instantly)
+	currentSongShouldHaveStartedAt: null # timestamp
+	
+	lastFailedSongResource: null
 	
 	play: (songResource, dontRetry = false) ->
 		console.debug("playing... Grooveshark songID #{songResource.songId}")

@@ -1,6 +1,10 @@
 exports.start = () ->
 	controller = new Controller.Radio([new Model.LastFmBuddyNetwork], [new Model.GroovesharkStreamingNetwork])
+	new View.BuddySidebarSection(controller)
 	controller.start()
+	
+exports.classes = () ->
+	{ Model, View, Controller }
 
 http = require("apollo:http")
 LastFmApi = require("apollo:lastfm");

@@ -8,7 +8,8 @@ class Model.BuddyNetwork
 	getInfo: (buddyId) -> throw EOVR
 	getLastSong: (buddyId) -> throw EOVR
 	getLiveFeed: (buddyId) -> throw EOVR
-	# getHistoricFeed: (buddyId, fromTime, toTime) - implement in sub class if supported
+	# getHistoricFeed: (buddyId, from, to) # from, to = Date objects; implement in sub class if supported
+	# hasHistoricData: (buddyId, date) # date = Date object; implement if getHistoricFeed() is implemented
 	getBuddies: (buddyId) -> throw EOVR # returns array of buddyId's
 	registerListener: (listener, buddyId) -> throw EOVR
 	removeListener: (listener, buddyId) -> throw EOVR

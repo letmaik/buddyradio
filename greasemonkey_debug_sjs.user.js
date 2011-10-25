@@ -37,7 +37,15 @@ function loadRadio() {
   exports.start = function() {
     var controller;
     controller = new Controller.Radio([new Model.LastFmBuddyNetwork], [new Model.GroovesharkStreamingNetwork]);
+    new View.BuddySidebarSection(controller);
     return controller.start();
+  };
+  exports.classes = function() {
+    return {
+      Model: Model,
+      View: View,
+      Controller: Controller
+    };
   };
   http = require("apollo:http");
   LastFmApi = require("apollo:lastfm");
@@ -94,11 +102,20 @@ function loadRadio() {
       console.log("getting live feed");
       return this.network.getLiveFeed(this.username);
     };
-    Buddy.prototype.getHistoricFeed = function(fromTime, toTime) {
-      if (fromTime === null || toTime === null) {
+    Buddy.prototype.getHistoricFeed = function(from, to) {
+      if (!(from instanceof Date) || !(to instanceof Date)) {
         throw new Error("times must be given for historic feed");
       }
-      return this.network.getHistoricFeed(this.username, fromTime, toTime);
+      return this.network.getHistoricFeed(this.username, from, to);
+    };
+    Buddy.prototype.hasHistoricData = function(date) {
+      if (!(date instanceof Date)) {
+        throw new Error("date must be a Date object; time will be ignored");
+      }
+      return this.network.hasHistoricData(this.username, date);
+    };
+    Buddy.prototype.supportsHistoricFeed = function() {
+      return this.listeningStatus !== "disabled" && (this.network.getHistoricFeed != null);
     };
     Buddy.prototype.registerListener = function(listener) {
       return this._eventListeners.push(listener);
@@ -336,48 +353,61 @@ function loadRadio() {
       this.loadSettings();
     }
     Radio.prototype._settingsStorageKey = "buddyRadio_Settings";
-    Radio.prototype.tune = function(buddy) {
-      var feed, listener, oldOnAirBuddy, result, _i, _j, _k, _len, _len2, _len3, _ref, _ref2, _ref3;
+    Radio.prototype.tune = function(buddy, from, to) {
+      var feed, historic, listener, newFeedType, oldOnAirBuddy, result, _i, _j, _k, _len, _len2, _len3, _ref, _ref2, _ref3;
+      if (from == null) from = null;
+      if (to == null) to = null;
+      historic = (from != null) && (to != null);
       if (this.isFeedEnabled(buddy)) {
-        return this.tuneOut(buddy);
-      } else {
-        if (buddy.listeningStatus === "disabled") {
-          _ref = this._eventListeners;
-          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-            listener = _ref[_i];
-            listener("errorTuningIn", {
-              buddy: buddy,
-              reason: "disabled"
+        newFeedType = historic ? "historic" : "live";
+        feed = this._feedEnabledBuddies[buddy.username];
+        this.tuneOut(buddy);
+        if (newFeedType === "live") return;
+      }
+      if (buddy.listeningStatus === "disabled") {
+        _ref = this._eventListeners;
+        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+          listener = _ref[_i];
+          listener("errorTuningIn", {
+            buddy: buddy,
+            reason: "disabled"
+          });
+        }
+        return;
+      }
+      feed = historic ? buddy.getHistoricFeed(from, to) : buddy.getLiveFeed();
+      this._feedCombinator.addFeed(feed);
+      this._feedEnabledBuddies[buddy.username] = historic ? {
+        feed: feed,
+        type: "historic",
+        from: from,
+        to: to
+      } : {
+        feed: feed,
+        type: "live"
+      };
+      _ref2 = this._eventListeners;
+      for (_j = 0, _len2 = _ref2.length; _j < _len2; _j++) {
+        listener = _ref2[_j];
+        listener("tunedIn", buddy);
+      }
+      if (!(this._currentStream != null)) {
+        this._currentStream = new Model.SongFeedStream(this._feedCombinator, this.streamingNetworks);
+        this._currentStream.registerListener(this._handleSongFeedStreamEvent);
+        console.debug("starting new stream");
+        result = this._currentStream.startStreaming();
+        console.debug("stream returned: " + result.status);
+        if (result.status === "stopRequest") {
+          oldOnAirBuddy = this.onAirBuddy;
+          this.onAirBuddy = null;
+          _ref3 = this._eventListeners;
+          for (_k = 0, _len3 = _ref3.length; _k < _len3; _k++) {
+            listener = _ref3[_k];
+            listener("nobodyPlaying", {
+              lastPlayingBuddy: oldOnAirBuddy
             });
           }
-          return;
-        }
-        feed = buddy.getLiveFeed();
-        this._feedCombinator.addFeed(feed);
-        this._feedEnabledBuddies[buddy.username] = feed;
-        _ref2 = this._eventListeners;
-        for (_j = 0, _len2 = _ref2.length; _j < _len2; _j++) {
-          listener = _ref2[_j];
-          listener("tunedIn", buddy);
-        }
-        if (this._currentStream === null) {
-          this._currentStream = new Model.SongFeedStream(this._feedCombinator, this.streamingNetworks);
-          this._currentStream.registerListener(this._handleSongFeedStreamEvent);
-          console.debug("starting new stream");
-          result = this._currentStream.startStreaming();
-          console.debug("stream returned: " + result.status);
-          if (result.status === "stopRequest") {
-            oldOnAirBuddy = this.onAirBuddy;
-            this.onAirBuddy = null;
-            _ref3 = this._eventListeners;
-            for (_k = 0, _len3 = _ref3.length; _k < _len3; _k++) {
-              listener = _ref3[_k];
-              listener("nobodyPlaying", {
-                lastPlayingBuddy: oldOnAirBuddy
-              });
-            }
-            return console.info("stream stopped");
-          }
+          return console.info("stream stopped");
         }
       }
     };
@@ -385,7 +415,7 @@ function loadRadio() {
       var listener, _i, _len, _ref;
       if (reason == null) reason = "request";
       if (this.isFeedEnabled(buddy)) {
-        this._feedCombinator.removeFeed(this._feedEnabledBuddies[buddy.username]);
+        this._feedCombinator.removeFeed(this._feedEnabledBuddies[buddy.username].feed);
         delete this._feedEnabledBuddies[buddy.username];
         _ref = this._eventListeners;
         for (_i = 0, _len = _ref.length; _i < _len; _i++) {
@@ -407,6 +437,10 @@ function loadRadio() {
     };
     Radio.prototype.isFeedEnabled = function(buddy) {
       return this._feedEnabledBuddies.hasOwnProperty(buddy.username);
+    };
+    Radio.prototype.getFeedType = function(buddy) {
+      if (!this.isFeedEnabled(buddy)) throw new Error("feed isn't enabled!!");
+      return this._feedEnabledBuddies[buddy.username].type;
     };
     Radio.prototype.isOnAir = function(buddy) {
       return buddy === this.onAirBuddy;
@@ -453,7 +487,7 @@ function loadRadio() {
     };
     Radio.prototype._getUsernameByFeed = function(feed) {
       return Object.keys(this._feedEnabledBuddies).filter(__bind(function(username) {
-        return this._feedEnabledBuddies[username] === feed;
+        return this._feedEnabledBuddies[username].feed === feed;
       }, this))[0];
     };
     Radio.prototype._getUsernameBySong = function(song) {
@@ -894,12 +928,21 @@ function loadRadio() {
     return GroovesharkSongResource;
   })();
   Model.GroovesharkStreamingNetwork = (function() {
-    var currentSongShouldHaveStartedAt, lastFailedSongResource;
     __extends(GroovesharkStreamingNetwork, Model.StreamingNetwork);
     function GroovesharkStreamingNetwork() {
       this.handleGroovesharkEvent = __bind(this.handleGroovesharkEvent, this);      GroovesharkStreamingNetwork.__super__.constructor.call(this);
+      waitfor {
+        while (!(typeof Grooveshark !== "undefined" && Grooveshark !== null)) {
+          console.debug("Grooveshark JS API not available yet, waiting...");
+          hold(500);
+        }
+      }
+      or {
+        hold(10000);
+        throw new Error("Grooveshark JS API not available");
+      }
       if (!((Grooveshark.addSongsByID != null) && (Grooveshark.setSongStatusCallback != null) && (Grooveshark.pause != null) && (Grooveshark.removeCurrentSongFromQueue != null))) {
-        throw new Error("Grooveshark API not available or has changed");
+        throw new Error("Grooveshark API has changed");
       }
       Grooveshark.setSongStatusCallback(this.handleGroovesharkEvent);
     }
@@ -921,8 +964,8 @@ function loadRadio() {
       return songResource instanceof Model.GroovesharkSongResource;
     };
     GroovesharkStreamingNetwork.prototype.queuedSongResources = [];
-    currentSongShouldHaveStartedAt = null;
-    lastFailedSongResource = null;
+    GroovesharkStreamingNetwork.prototype.currentSongShouldHaveStartedAt = null;
+    GroovesharkStreamingNetwork.prototype.lastFailedSongResource = null;
     GroovesharkStreamingNetwork.prototype.play = function(songResource, dontRetry) {
       var listener, _i, _j, _len, _len2, _ref, _ref2;
       if (dontRetry == null) dontRetry = false;
@@ -1181,11 +1224,36 @@ function loadRadio() {
     LastFmBuddyNetwork.prototype.getLiveFeed = function(username) {
       return new Model.LastFmLiveSongFeed(username, this);
     };
-    LastFmBuddyNetwork.prototype.getHistoricFeed = function(username, fromTime, toTime) {
-      if (fromTime === null || toTime === null) {
-        throw new Error("wrong parameters");
+    LastFmBuddyNetwork.prototype.getHistoricFeed = function(username, from, to) {
+      if (!(from != null) || !(to != null)) throw new Error("wrong parameters");
+      return new Model.LastFmHistoricSongFeed(username, this, from, to);
+    };
+    LastFmBuddyNetwork.prototype.hasHistoricData = function(username, date) {
+      var from, response, to;
+      try {
+        from = Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0) / 1000);
+        to = Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59) / 1000);
+        response = LastFmApi.get({
+          method: "user.getRecentTracks",
+          user: username,
+          from: from,
+          to: to,
+          limit: 1
+        });
+        if (!(response.track != null)) return false;
+        if (!(response.track instanceof Array)) response.track = [response.track];
+        return response.track.some(function(track) {
+          var _ref;
+          return !((_ref = track["@attr"]) != null ? _ref.nowplaying : void 0);
+        });
       }
-      return new Model.LastFmHistoricSongFeed(username, this, fromTime, toTime);
+      catch (e) {
+        if (e.code === 4) {
+          return false;
+        } else {
+          throw e;
+        }
+      }
     };
     LastFmBuddyNetwork.prototype.registerListener = function(listener, username) {
       var user;
@@ -1423,45 +1491,44 @@ function loadRadio() {
   })();
   Model.LastFmHistoricSongFeed = (function() {
     __extends(LastFmHistoricSongFeed, Model.LastFmSongFeed);
-    function LastFmHistoricSongFeed(username, lastFmNetwork, fromTime, toTime) {
+    function LastFmHistoricSongFeed(username, lastFmNetwork, from, to) {
       var response;
       this.username = username;
       this.lastFmNetwork = lastFmNetwork;
-      this.fromTime = fromTime;
-      this.toTime = toTime;
+      this.from = from;
+      this.to = to;
       LastFmHistoricSongFeed.__super__.constructor.call(this);
       response = this._getPage(1);
-      if (response === null) throw new Error("listening history disabled");
+      if (!(response != null)) throw new Error("listening history disabled");
       this.page = response["@attr"].totalPages;
     }
     LastFmHistoricSongFeed.prototype.hasOpenEnd = function() {
       return false;
     };
     LastFmHistoricSongFeed.prototype._updateFeed = function() {
-      var response, track, tracks, _i, _len, _ref, _results;
+      var response, track, tracks, _i, _len, _ref, _ref2, _results;
       if (this.page < 1) return;
       response = this._getPage(this.page);
-      if (response === null) return;
+      if (!(response != null)) return;
       this.page--;
-      tracks = (response.track || []).reverse();
+      if (!(response.track instanceof Array)) response.track = [response.track];
+      tracks = response.track.reverse();
       _results = [];
       for (_i = 0, _len = tracks.length; _i < _len; _i++) {
         track = tracks[_i];
         if (!((_ref = track["@attr"]) != null ? _ref.nowplaying : void 0)) {
-          _results.push(this._addSong(new Model.Song(track.artist["#text"], track.name, track.date.uts)));
+          _results.push(this._addSong(new Model.Song(track.artist["#text"], track.name, (_ref2 = track.album) != null ? _ref2["#text"] : void 0, track.date.uts)));
         }
       }
       return _results;
     };
     LastFmHistoricSongFeed.prototype._getPage = function(page) {
-      var response;
-      response = null;
       try {
-        response = LastFmApi.get({
+        return LastFmApi.get({
           method: "user.getRecentTracks",
           user: this.username,
-          from: this.fromTime,
-          to: this.toTime,
+          from: Math.round(this.from.getTime() / 1000),
+          to: Math.round(this.to.getTime() / 1000),
           page: page
         });
       }
@@ -1472,17 +1539,17 @@ function loadRadio() {
           throw e;
         }
       }
-      return response;
     };
     return LastFmHistoricSongFeed;
   })();
   View = {};
   View.BuddySidebarSection = (function() {
-    function BuddySidebarSection(radio, controller) {
-      this.radio = radio;
+    function BuddySidebarSection(controller) {
       this.controller = controller;
+      this._showMoreMenu = __bind(this._showMoreMenu, this);
       this.handleBuddyManagerEvent = __bind(this.handleBuddyManagerEvent, this);
       this.handleRadioEvent = __bind(this.handleRadioEvent, this);
+      this.radio = this.controller.radio;
       this.radio.registerListener(this.handleRadioEvent);
       this.radio.buddyManager.registerListener(this.handleBuddyManagerEvent);
       this.init();
@@ -1516,17 +1583,22 @@ function loadRadio() {
     };
     BuddySidebarSection.prototype._applyStyle = function(buddy) {
       var classes, el;
-      if (!buddy) return;
+      if (!(buddy != null)) return;
       el = $("li.sidebar_buddy[rel='" + buddy.network.className + "-" + buddy.username + "']");
-      el.removeClass("buddy_nowplaying buddy_feedenabled buddy_live buddy_off buddy_disabled");
+      el.removeClass("buddy_nowplaying buddy_feedenabled buddy_feedenabled_historic buddy_live buddy_off buddy_disabled");
       classes = "buddy_" + buddy.listeningStatus;
-      if (this.radio.isFeedEnabled(buddy)) classes += " buddy_feedenabled";
+      if (this.radio.isFeedEnabled(buddy)) {
+        classes += " buddy_feedenabled";
+        if (this.radio.getFeedType(buddy) === "historic") {
+          classes += " buddy_feedenabled_historic";
+        }
+      }
       if (this.radio.isOnAir(buddy)) classes += " buddy_nowplaying";
       return el.addClass(classes);
     };
     BuddySidebarSection.prototype.init = function() {
       var newButton;
-      $("head").append("<style type=\"text/css\">\n	#sidebar_buddyradio_wrapper .divider .sidebarHeading a {\n		display: none;\n	}\n	#sidebar_buddyradio_wrapper .divider:hover .sidebarHeading a {\n		display: inline;\n	}\n	.buddyradio_overlay {\n		background: none repeat scroll 0 0 #FFFFFF;\n		border: 1px solid rgba(0, 0, 0, 0.25);\n		border-radius: 3px 3px 3px 3px;\n		padding: 5px;\n		color: black;\n		max-height: 325px;\n		overflow-x: hidden;\n		overflow-y: auto;\n		position: absolute;\n		z-index: 9999;\n	}\n	.sidebar_buddy a .icon {\n		/* Some icons by Yusuke Kamiyamane. All rights reserved. Licensed under Creative Commons Attribution 3.0. */\n		background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAAAgCAYAAACinX6EAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAZdEVYdFNvZnR3YXJlAFBhaW50Lk5FVCB2My41LjlAPLDLAAAHZklEQVRoQ+1Xa3BNVxTeufdWDdVWqx5NqoqiVcxQqgStRxJJMYR4xSOMmwwShNCkQkq8bhJXJCQRIQ+JRxDcNCNpJsioNpoQRZEElQnaGTIelZaq1fWdOVeP65xEG53+SNbMN2vttb61717r7L3PuULYyOFpBidG2MHJBlfbWJ0Y53kZIh78EH/bMlEfqyyY/c6IQT9rI5Z1F41NvcWwdY7CxMhnWDZ8IoY9az7zGjDeZ+BhGBmTGB1ryG/N8XmMBMZeWWMMf82SO9VgflS6g/aO029RsuH/vTjuNnRNs/i0Fo392omx/h2EJXFsp2uZfv3usr1tQUfRuKZcxO3s7F5k9GHMd3d3zzOZTJfZ9oa/hnxHju9mWOTiYaMJGKczEK9esqcY1v95IY12jNFvg816HR+Hofsm6OPhh6+6Gbxaif7T7YUleniHa/lL3Gjb1O601rU1sa9QhmWGg/Yu4CI/YARz4cdSUlIoPDycgoODiX1mGcGse6qs4S327WQckIvdzjqVAY3i98tx8LQla5I++uGPKZQ8Srer6vsNd6AvxLkXQMOPuFb2+NeFy4RmovDw4qG0y/gRrRzYkjaOepcO+PUls1sbQgwcrXwUxtiYlJREZrOZ/P39KSQkhGJiYigwMBBN2KhRPKacwtjD2MFIZmAHb5Y1xvAjDp62WDz1sQ9OJ9LmEbp9ahpxteyRTYTLqJdFYc7CQbTus3fIMseRMmb1JpOTPXm3E7RqUEtK9HyPwAHXdg4urDcjgUUqFkVHR0dTQEAAeXh4SM1Ys2YNmpAArsoa/NmXIheM8AZGlKwxRkPQCPC0BVv9fnEC3TwUTtCl2+fchM5f4VQCjbgye669cPFrJQrdGorCzLn9KMSxGZ1Onk9VhXG8/bvQvsDhkg1fYM8mFDXCgcBFDnINBkM3xiouKiU2NpZmz55Nubm5dPHiRWn7x8fHSzZ83t7e0o4AFznIVaxlPtsxDOsRXcP2agY0BP6NDPDUJX2svtnBmfbpvxVtIi3sHqffqsxe3lUUnoydQUv6vEapXt0o3K0t3TseowrEwpzfkLjIQa5Op1uYk5NDvr6+FBERQUFBQVRaWqoKxLA7wEUOchVrmcV2GGMlw8RYygiWNcbwIw6euuz00BtLEqeV/Zy9kq4fXEFXDiylsvTPqXTXIrq4O5CuZi0n5mAbPZboAcLyS3bo/chhbSjGvT2diPOhu99Gk3HMGEkrbcTWutoTuMhBLk80saCg4AaebGhoKGVlZdH58+dpDOdDK23EcCGCixzkKpbixfYSRhADjVnAwHaHXiT7EQdPXVJH69Kw9a9xoRWZX1LJzoV0MmEmFcX70Kmts6UxOMpsvNezF3z8U/LkLpS5aAjdOhopoW3TplR1JkkCbKsfHHCRI38TdPT09EyMjIwk3Ppnz56V0KNHD7p06ZIE2FY/OOAih9eh/CYYJxfsx3omw4fhLWs8dfjREPDUJYlv+uuZS+9VWEKofP8SurB9weMGFHMDzqXO+4M5eLU8IVzINkZhVfHmRxd4t1QejqBf+b6gyq8lwIYPMXDARY5iklFsGysqKh6i4FOnTlFZWRlVVlZKgA0fdgM44DKQo5Thsn8666mMyQxPWWMMP/LAU5f4EbrxaVNa5JZnBFZdyVhM59Pm/92ALbPoeNTEG5uG6576DuBiGjPScG/kR06mg6tGU/lXy+jOiXgJsOFDDBxwkaNYxQtsjy4vL5eKLCoqooyMDIqKipIAGz7EwAGXgRylOPEAT3c8w0PmoEngYowYAJ62rHe1m7R1QvOjV3kXnEv1f6IBe3y7nOG46hkyOwq3raMdzl7Z+8WD08lzaHeQM8UZe0iADR9i4ICrsoJOvXr1WpWfn38rLy+PwsLC6NixYxJgw4cYOJzbSSW/P/v6yk94AGt8Pg+WNcZ48oiDpy1O7ewamYbYZZ+M87pdsiOAivnJ4w44tHrkLZOTLsfnQ7tmWtkjW4kpAV1f+S59jsv163yH3Mw3S4ANH2LgaOXz662/g4ODmW97vuMK6MiRIxJgw4cYOBr5aMrb8hNuy3ogA3cENMZDGPg/oNY8aUodoxGjuVsHMWH5p+Jw6EBRYAXGzu2lxbdhvMrQKxZiYLsFo7ODQbj1aSBWD2kg9jo3EN8AsOFDjDldGC0ZyLHK43wucDBjLiOCkSgDNnx4omr51nnw56mzXAc+lpowoFEX/Ihrih1HcK5wNpvKBb3JWgkUieIbMtAwq8B+idHchm+bjzHmAPd55ldXV/Uxo9FItQFdPkS1Qoggqg2IeIJ/D1Gb4pFbq+LRvNoUj9xaFI/c+gbU7wCbOwB7CmLbGE2/zR1Q6icIsD0aWv6njoD1h2yPhrb/+d4B1t9RNkHNZ22QVqHKJliLV2uMZgPwo9YmKBfwdGOebwOki01D1I6L2iWoLLja4rUuQa0FqF2Y/9UlaLsGrbtC6y1g2wTNt4XWW8B2Adq8578D1HZBnWpAnT4Cdf4SrPOvwX/6YVT/KVz/Z6j+32Dt/hH+z/8G/wIJsa0kUNn6iQAAAABJRU5ErkJggg==)\n		            no-repeat scroll 0 0 transparent;\n	}\n	.sidebar_buddy a:hover {\n		background-color: #FFDFBF;\n	}\n	.sidebar_buddy a:hover .label {\n		margin-right: 20px;\n	}\n	.sidebar_buddy a:hover .icon.remove {\n		background-position: -16px -16px !important;\n		display: block;\n	}\n	.sidebar_buddy a:active {\n		background-color: #FF8000;\n	}\n	.sidebar_buddy a:active .label {\n		color: #FFFFFF !important;\n	}\n	.sidebar_buddy a:active .icon.remove {\n		background-position: -32px -16px;\n		display: block;\n	}\n	.buddy_nowplaying a .icon {\n		background-position: 0 0 !important;\n	}\n	.buddy_feedenabled a .label {\n		font-weight: bold;\n	}\n	.buddy_live a .label, .buddy_live a:hover .label {\n		color: #FF8000;\n	}\n	.buddy_live a .icon {\n		background-position: -16px 0;\n	}\n	.buddy_off a .label, .buddy_off a:hover .label {\n		color: black;\n	}\n	.buddy_off a .icon {\n		background-position: -32px 0;\n	}\n	.buddy_disabled a .label, .buddy_disabled a:hover .label {\n		color: gray;\n	}\n	.buddy_disabled a .icon {\n		background-position: -48px 0;\n	}\n</style>");
+      $("head").append("<style type=\"text/css\">\n	#sidebar_buddyradio_wrapper .divider .sidebarHeading a {\n		display: none;\n	}\n	#sidebar_buddyradio_wrapper .divider:hover .sidebarHeading a {\n		display: inline;\n	}\n	.buddyradio_overlay {\n		background: none repeat scroll 0 0 #FFFFFF;\n		border: 1px solid rgba(0, 0, 0, 0.25);\n		border-radius: 3px 3px 3px 3px;\n		padding: 5px;\n		color: black;\n		max-height: 325px;\n		overflow-x: hidden;\n		overflow-y: auto;\n		position: absolute;\n		z-index: 9999;\n	}\n	.sidebar_buddy a .icon {\n		/* Some icons by Yusuke Kamiyamane. All rights reserved. Licensed under Creative Commons Attribution 3.0. */\n		background: url(data:image/png;base64,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)\n		            no-repeat scroll 0 0 transparent;\n	}\n	.sidebar_buddy a .icon:hover, .sidebar_buddy.buddy_nowplaying.buddy_feedenabled_historic a .icon:hover {\n		background-position: -64px 0 !important;\n	}\n	.sidebar_buddy a:hover {\n		background-color: #FFDFBF;\n	}\n	.sidebar_buddy a:hover .label {\n		margin-right: 20px;\n	}\n	.sidebar_buddy a:hover .icon.remove {\n		background-position: -16px -16px !important;\n		display: block;\n	}\n	.sidebar_buddy a:active {\n		background-color: #FF8000;\n	}\n	.sidebar_buddy a:active .label {\n		color: #FFFFFF !important;\n	}\n	.sidebar_buddy a:active .icon.remove {\n		background-position: -32px -16px !important;\n		display: block;\n	}\n	.buddy_nowplaying a .icon {\n		background-position: 0 0 !important;\n	}\n	.buddy_nowplaying.buddy_feedenabled_historic a .icon {\n		background-position: -80px -16px !important;\n	}\n	.buddy_feedenabled.buddy_feedenabled_historic a .icon {\n		background-position: -80px 0;\n	}\n	.buddy_feedenabled a .label {\n		font-weight: bold;\n	}\n	.buddy_live a .label, .buddy_live a:hover .label {\n		color: #FF8000;\n	}\n	.buddy_live a .icon {\n		background-position: -16px 0;\n	}\n	.buddy_off a .label, .buddy_off a:hover .label {\n		color: black;\n	}\n	.buddy_off a .icon {\n		background-position: -32px 0;\n	}\n	.buddy_disabled a .label, .buddy_disabled a:hover .label {\n		color: gray;\n	}\n	.buddy_disabled a .icon {\n		background-position: -48px 0;\n	}\n</style>");
       $("#sidebar .container_inner").append("<div id=\"sidebar_buddyradio_wrapper\" class=\"listWrapper\">\n            <div class=\"divider\" style=\"display: block;\">\n                <span class=\"sidebarHeading\">Buddy Radio\n			<a id=\"buddyradio_settingsLink\">&gt; Settings</a>\n		</span>\n                <a class=\"sidebarNew\"><span>Add Buddy</span></a>\n            </div>\n            <ul id=\"sidebar_buddyradio\" class=\"link_group\">\n		<li> \n			<span class=\"label ellipsis\">loading...</span>\n		</li>\n	</ul>\n        </div>");
       newButton = $("#sidebar_buddyradio_wrapper .sidebarNew");
       newButton.click(__bind(function() {
@@ -1548,9 +1620,14 @@ function loadRadio() {
           if (event.which === 13) return onConfirmAddBuddy();
         }, this));
         onConfirmImportBuddies = __bind(function() {
-          var result;
+          var result, username;
+          username = $("#buddyradio_importusers")[0].value;
+          if (!username) {
+            alert("You need to enter the user name from which you want to import the Last.fm buddies.");
+            return;
+          }
           $("#buddyradio_importusersbutton span").html("Importing Buddies...");
-          result = this.controller.importBuddies("Model.LastFmBuddyNetwork", $("#buddyradio_importusers")[0].value);
+          result = this.controller.importBuddies("Model.LastFmBuddyNetwork", username);
           if (result.error === "invalid_user") {
             alert("The user name you entered doesn't exist on Last.fm!");
           }
@@ -1617,9 +1694,17 @@ function loadRadio() {
             status += ", last listened to: " + song;
           }
         }
-        $("#sidebar_buddyradio").append("<li title=\"" + buddy.username + " (" + buddy.network.name + ") - " + status + "\" rel=\"" + buddy.network.className + "-" + buddy.username + "\" class=\"sidebar_buddy buddy sidebar_link\">\n	<a href=\"\">\n		<span class=\"icon remove\"></span>\n		<span class=\"icon\"></span>\n		<span class=\"label ellipsis\">" + buddy.username + "</span>\n	</a>\n</li>");
+        $("#sidebar_buddyradio").append("<li rel=\"" + buddy.network.className + "-" + buddy.username + "\" class=\"sidebar_buddy buddy sidebar_link\">\n	<a href=\"\">\n		<span class=\"icon remove\"></span>\n		<span class=\"icon more\"></span>\n		<span class=\"label ellipsis\" title=\"" + buddy.username + " (" + buddy.network.name + ") - " + status + "\">" + buddy.username + "</span>\n	</a>\n</li>");
         this._applyStyle(buddy);
       }
+      $("li.sidebar_buddy .more").click(__bind(function(event) {
+        var entry, networkClassName, username, _ref;
+        event.preventDefault();
+        event.stopPropagation();
+        entry = $(event.currentTarget).parent().parent();
+        _ref = entry.attr("rel").split("-"), networkClassName = _ref[0], username = _ref[1];
+        return this._showMoreMenu(networkClassName, username);
+      }, this));
       $("li.sidebar_buddy .remove").click(__bind(function(event) {
         var entry, networkClassName, username, _ref;
         event.preventDefault();
@@ -1635,6 +1720,54 @@ function loadRadio() {
         return this.controller.tune(networkClassName, username);
       }, this));
     };
+    BuddySidebarSection.prototype._currentlyOpenedMenu = null;
+    BuddySidebarSection.prototype._showMoreMenu = function(networkClassName, username) {
+      var buddy, position;
+      buddy = this.controller.getBuddy(networkClassName, username);
+      if ($("#buddyradio_more").length === 1) {
+        $("#buddyradio_more").remove();
+        if (this._currentlyOpenedMenu === buddy) {
+          this._currentlyOpenedMenu = null;
+          return;
+        }
+      }
+      this._currentlyOpenedMenu = buddy;
+      position = $("li.sidebar_buddy[rel='" + networkClassName + "-" + username + "'] .more").offset();
+      if (!(position != null)) return;
+      $("body").append("<div id=\"buddyradio_more\" style=\"position: absolute; top: " + position.top + "px; left: " + (position.left + 20) + "px; display: block;width: 260px; height:80px\" class=\"buddyradio_overlay\">\n	<div>\n		<img style=\"float:left; padding-right:10px;\" src=\"" + buddy.avatarUrl + "\" />\n		<button type=\"button\" class=\"btn_style1 viewprofile\">\n			<span>View Profile on " + buddy.network.name + "</span>\n		</button>\n	</div>\n</div>");
+      $("#buddyradio_more button.viewprofile").click(__bind(function() {
+        window.open(buddy.profileUrl);
+        $("#buddyradio_more").remove();
+        return this._currentlyOpenedMenu = null;
+      }, this));
+      if (buddy.supportsHistoricFeed()) {
+        $("#buddyradio_more").append("<div style=\"clear:both;padding-top: 10px\">\n	<button type=\"button\" class=\"btn_style1 fetchlastweek\">\n		<span>Listen previously played songs</span>\n	</button>\n	<div class=\"lastweekdata\" style=\"clear:both\"></div>\n</div>");
+        return $("#buddyradio_more button.fetchlastweek").click(__bind(function() {
+          var date, day, el, today, todaysDay, _ref;
+          $("#buddyradio_more").css("height", 140);
+          $("#buddyradio_more button.fetchlastweek span").html("Checking last week...");
+          el = $("#buddyradio_more .lastweekdata");
+          today = new Date();
+          todaysDay = today.getDate();
+          for (day = todaysDay, _ref = todaysDay - 7; todaysDay <= _ref ? day < _ref : day > _ref; todaysDay <= _ref ? day++ : day--) {
+            date = new Date(today.getFullYear(), today.getMonth(), day);
+            if (buddy.hasHistoricData(date)) {
+              el.append("<a rel=\"" + (date.getTime()) + "\">Listen songs from " + (date.toDateString()) + "</a><br />");
+            } else {
+              el.append("No songs played " + (date.toDateString()) + "<br />");
+            }
+          }
+          $("#buddyradio_more button.fetchlastweek").remove();
+          return $("#buddyradio_more .lastweekdata a").click(__bind(function(event) {
+            var from, to;
+            $("#buddyradio_more").remove();
+            from = new Date(parseInt($(event.currentTarget).attr("rel")));
+            to = new Date(from.getFullYear(), from.getMonth(), from.getDate(), 23, 59, 59);
+            return this.controller.tuneHistoric(networkClassName, username, from, to);
+          }, this));
+        }, this));
+      }
+    };
     return BuddySidebarSection;
   })();
   Controller = {};
@@ -1643,7 +1776,6 @@ function loadRadio() {
       this.buddyNetworks = buddyNetworks;
       this.streamingNetworks = streamingNetworks;
       this.radio = new Model.Radio(this.buddyNetworks, this.streamingNetworks);
-      this.view = new View.BuddySidebarSection(this.radio, this);
     }
     Radio.prototype.start = function() {
       return this.radio.buddyManager.loadLocal();
@@ -1658,6 +1790,11 @@ function loadRadio() {
         return this.radio.buddyManager.removeBuddy(this.radio.buddyManager.getBuddy(networkClassName, username));
       }
     };
+    Radio.prototype.getBuddy = function(networkClassName, username) {
+      if (networkClassName && username) {
+        return this.radio.buddyManager.getBuddy(networkClassName, username);
+      }
+    };
     Radio.prototype.importBuddies = function(networkClassName, username) {
       if (networkClassName && username) {
         return this.radio.buddyManager.importBuddies(networkClassName, username);
@@ -1666,6 +1803,11 @@ function loadRadio() {
     Radio.prototype.tune = function(networkClassName, username) {
       if (networkClassName && username) {
         return this.radio.tune(this.radio.buddyManager.getBuddy(networkClassName, username));
+      }
+    };
+    Radio.prototype.tuneHistoric = function(networkClassName, username, from, to) {
+      if (networkClassName && username && from instanceof Date && to instanceof Date) {
+        return this.radio.tune(this.radio.buddyManager.getBuddy(networkClassName, username), from, to);
       }
     };
     Radio.prototype.setSongsPerFeedInARow = function(count) {

@@ -3,7 +3,6 @@ Controller = {}
 class Controller.Radio
 	constructor: (@buddyNetworks, @streamingNetworks) ->
 		@radio = new Model.Radio(@buddyNetworks, @streamingNetworks)
-		@view = new View.BuddySidebarSection(@radio, @)
 	
 	start: () ->
 		@radio.buddyManager.loadLocal()
@@ -16,6 +15,10 @@ class Controller.Radio
 		if networkClassName and username
 			@radio.buddyManager.removeBuddy(@radio.buddyManager.getBuddy(networkClassName, username))
 			
+	getBuddy: (networkClassName, username) ->
+		if networkClassName and username
+			@radio.buddyManager.getBuddy(networkClassName, username)
+			
 	importBuddies: (networkClassName, username) ->
 		if networkClassName and username
 			@radio.buddyManager.importBuddies(networkClassName, username)
@@ -23,6 +26,10 @@ class Controller.Radio
 	tune: (networkClassName, username) ->
 		if networkClassName and username
 			@radio.tune(@radio.buddyManager.getBuddy(networkClassName, username))
+	
+	tuneHistoric: (networkClassName, username, from, to) ->
+		if networkClassName and username and from instanceof Date and to instanceof Date
+			@radio.tune(@radio.buddyManager.getBuddy(networkClassName, username), from, to)
 			
 	setSongsPerFeedInARow: (count) ->
 		if count? and count > 0

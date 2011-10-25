@@ -76,10 +76,34 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	getLiveFeed: (username) ->
 		new Model.LastFmLiveSongFeed(username, @)
 		
-	getHistoricFeed: (username, fromTime, toTime) ->
-		if fromTime == null or toTime == null
+	getHistoricFeed: (username, from, to) ->
+		if not from? or not to?
 			throw new Error("wrong parameters")
-		new Model.LastFmHistoricSongFeed(username, @, fromTime, toTime)
+		new Model.LastFmHistoricSongFeed(username, @, from, to)
+	
+	# TODO cache data
+	hasHistoricData: (username, date) ->
+		try
+			from = Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0) / 1000)
+			to = Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59) / 1000)
+			response = LastFmApi.get({
+				method: "user.getRecentTracks",
+				user: username,
+				from, to,
+				limit: 1
+			})
+			if not response.track?
+				return false
+			# looks like we don't get an array if it's just one track...why?? stupid...
+			# remember: the nowplaying track can exist (which will make it 2 songs)
+			if not (response.track instanceof Array)
+				response.track = [response.track]
+			response.track.some((track) -> not track["@attr"]?.nowplaying)
+		catch e
+			if e.code == 4
+				false
+			else
+				throw e
 			
 	registerListener: (listener, username) ->
 		user = username.toLowerCase()
@@ -278,10 +302,10 @@ class Model.LastFmLiveSongFeed extends Model.LastFmSongFeed
 			@_currentSongsIdx = @_currentSongsIdx - newStartIdx
 		
 class Model.LastFmHistoricSongFeed extends Model.LastFmSongFeed
-	constructor: (@username, @lastFmNetwork, @fromTime, @toTime) ->
+	constructor: (@username, @lastFmNetwork, @from, @to) ->
 		super()
 		response = @_getPage(1)
-		if response == null
+		if not response?
 			throw new Error("listening history disabled")
 		@page = response["@attr"].totalPages		
 
@@ -291,31 +315,32 @@ class Model.LastFmHistoricSongFeed extends Model.LastFmSongFeed
 		if @page < 1
 			return
 		response = @_getPage(@page)
-		if response == null
+		if not response?
 			return
 		@page--
-		tracks = (response.track or []).reverse()
+		if not (response.track instanceof Array)
+			response.track = [response.track]
+		tracks = response.track.reverse()
 		@_addSong(
 			new Model.Song(
 				track.artist["#text"],
 				track.name,
+				track.album?["#text"],
 				track.date.uts
 			)
 		) for track in tracks when not track["@attr"]?.nowplaying
 			
 	_getPage: (page) ->
-		response = null
 		try
-			response = LastFmApi.get({
+			LastFmApi.get({
 				method: "user.getRecentTracks",
 				user: @username,
-				from: @fromTime,
-				to: @toTime,
+				from: Math.round(@from.getTime() / 1000),
+				to: Math.round(@to.getTime() / 1000),
 				page: page
 			})
 		catch e
 			if e.code == 4
-				return null
+				null
 			else
 				throw e
-		response

@@ -33,5 +33,14 @@ $tmpl_sjs = Get-Content "greasemonkey_debug_sjs.tmpl.js"
 $tmpl_sjs = $tmpl_sjs -replace "#SJS#", $sjs
 $tmpl_sjs | Out-File "greasemonkey_debug_sjs.user.js" -Encoding ASCII
 
+# run jasmin tests
+#$env:NODE_PATH = Join-Path $pwd "dist"
+#$env:NODE_PATH = Join-Path $pwd "lib\jasmine-node"
+apollo lib/jasmine-node/cli.sjs --coffee --verbose ./spec
+if ($LastExitCode -ne 0) {
+	Read-Host "press any key to exit..."
+	exit $LastExitCode
+}
+
 # minify obviously won't work yet as sjs is non-standard js
 # probably not required either (~70kb .sjs gets gzipped to ~15kb)

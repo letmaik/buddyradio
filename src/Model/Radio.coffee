@@ -13,7 +13,7 @@ class Model.Radio
 		@buddyManager.registerListener(@_handleBuddyManagerEvent)
 		@_currentStream = null
 		@_eventListeners = []
-		@_feedEnabledBuddies = {} # map username -> SongFeed
+		@_feedEnabledBuddies = {} # map username -> {feed: SongFeed, type: "live|historic"}
 		@_feedCombinator = new Model.AlternatingSongFeedCombinator()
 		@_feedCombinator.registerListener(@_handleFeedCombinatorEvent)
 		# TODO clean up now and then (problem: when?)
@@ -24,39 +24,60 @@ class Model.Radio
 		@loadSettings()
 		
 	_settingsStorageKey: "buddyRadio_Settings"
-		
-	tune: (buddy) ->
+	
+	# TODO if multiple feeds are played and one historic feed ends, this feed's end isn't visible in UI
+	#      -> add listener to individual non-live-feeds (endOfFeed event) so that they can be forwarded
+	# TODO skipping a song in historic mode would work better with a 1-song-preload
+	
+	# from = to = null -> live
+	tune: (buddy, from = null, to = null) ->
+		historic = from? and to?
 		if @isFeedEnabled(buddy)
+			newFeedType = if historic then "historic" else "live"
+			feed = @_feedEnabledBuddies[buddy.username]
 			@tuneOut(buddy)
-		else
-			if buddy.listeningStatus == "disabled"
-				listener("errorTuningIn", {buddy, reason: "disabled"}) for listener in @_eventListeners
+			# stop if live -> live or historic -> live
+			# this logic should probably belong somewhere else and be a bit more concise
+			if newFeedType == "live"
 				return
-			feed = buddy.getLiveFeed()
-			@_feedCombinator.addFeed(feed)
-			@_feedEnabledBuddies[buddy.username] = feed
+
+		if buddy.listeningStatus == "disabled"
+			listener("errorTuningIn", {buddy, reason: "disabled"}) for listener in @_eventListeners
+			return
 			
-			listener("tunedIn", buddy) for listener in @_eventListeners
-			
-			if @_currentStream == null
-				@_currentStream = new Model.SongFeedStream(@_feedCombinator, @streamingNetworks)
-				@_currentStream.registerListener(@_handleSongFeedStreamEvent)
-				console.debug("starting new stream")
-				result = @_currentStream.startStreaming()
-				console.debug("stream returned: #{result.status}")
+		feed = 
+			if historic
+				buddy.getHistoricFeed(from, to)
+			else
+				buddy.getLiveFeed()
+		@_feedCombinator.addFeed(feed)
+		@_feedEnabledBuddies[buddy.username] = 
+			if historic
+				{ feed, type: "historic", from, to}
+			else
+				{ feed, type: "live" }
+		
+		listener("tunedIn", buddy) for listener in @_eventListeners
+		
+		if not @_currentStream?
+			@_currentStream = new Model.SongFeedStream(@_feedCombinator, @streamingNetworks)
+			@_currentStream.registerListener(@_handleSongFeedStreamEvent)
+			console.debug("starting new stream")
+			result = @_currentStream.startStreaming()
+			console.debug("stream returned: #{result.status}")
 #				if result.status == "endOfFeed"
 #					listener("streamCompleted") for listener in @_eventListeners
 #					console.info("stream completed")
-				if result.status == "stopRequest"
-					# TODO duplicated code
-					oldOnAirBuddy = @onAirBuddy
-					@onAirBuddy = null
-					listener("nobodyPlaying", {lastPlayingBuddy: oldOnAirBuddy}) for listener in @_eventListeners
-					console.info("stream stopped")
-	
+			if result.status == "stopRequest"
+				# TODO duplicated code
+				oldOnAirBuddy = @onAirBuddy
+				@onAirBuddy = null
+				listener("nobodyPlaying", {lastPlayingBuddy: oldOnAirBuddy}) for listener in @_eventListeners
+				console.info("stream stopped")
+					
 	tuneOut: (buddy, reason = "request") ->
 		if @isFeedEnabled(buddy)
-			@_feedCombinator.removeFeed(@_feedEnabledBuddies[buddy.username])
+			@_feedCombinator.removeFeed(@_feedEnabledBuddies[buddy.username].feed)
 			delete @_feedEnabledBuddies[buddy.username]
 			listener("tunedOut", {buddy, reason}) for listener in @_eventListeners
 			if Object.keys(@_feedEnabledBuddies).length == 0
@@ -69,6 +90,11 @@ class Model.Radio
 		
 	isFeedEnabled: (buddy) ->
 		@_feedEnabledBuddies.hasOwnProperty(buddy.username)
+		
+	getFeedType: (buddy) ->
+		if not @isFeedEnabled(buddy)
+			throw new Error("feed isn't enabled!!")
+		@_feedEnabledBuddies[buddy.username].type
 		
 	isOnAir: (buddy) ->
 		buddy == @onAirBuddy
@@ -104,7 +130,7 @@ class Model.Radio
 			console.debug("song '#{data.song}' feeded from #{username}")
 	
 	_getUsernameByFeed: (feed) ->
-		Object.keys(@_feedEnabledBuddies).filter((username) => @_feedEnabledBuddies[username] == feed)[0]
+		Object.keys(@_feedEnabledBuddies).filter((username) => @_feedEnabledBuddies[username].feed == feed)[0]
 	
 	_getUsernameBySong: (song) ->
 		Object.keys(@_feededSongs).filter((username) => @_feededSongs[username].indexOf(song) != -1)[0]

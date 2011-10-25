@@ -32,7 +32,11 @@ function coffeeLoaded(err, module) {
 	var debugMultiLineHack = (<><![CDATA[
 exports.start = () ->
 	controller = new Controller.Radio([new Model.LastFmBuddyNetwork], [new Model.GroovesharkStreamingNetwork])
+	new View.BuddySidebarSection(controller)
 	controller.start()
+	
+exports.classes = () ->
+	{ Model, View, Controller }
 
 http = require("apollo:http")
 LastFmApi = require("apollo:lastfm");
@@ -82,11 +86,20 @@ class Model.Buddy
 		console.log("getting live feed")
 		@network.getLiveFeed(@username)
 	
-	# fromTime, toTime: UTC unix timestamps
-	getHistoricFeed: (fromTime, toTime) ->
-		if fromTime == null or toTime == null
+	# fromTime, toTime: Date objects
+	getHistoricFeed: (from, to) ->
+		if not (from instanceof Date) or not (to instanceof Date)
 			throw new Error("times must be given for historic feed")
-		@network.getHistoricFeed(@username, fromTime, toTime)
+		@network.getHistoricFeed(@username, from, to)
+	
+	# date = day (time will be ignored)
+	hasHistoricData: (date) ->
+		if not (date instanceof Date)
+			throw new Error("date must be a Date object; time will be ignored")
+		@network.hasHistoricData(@username, date)
+		
+	supportsHistoricFeed: () ->
+		@listeningStatus != "disabled" and @network.getHistoricFeed?
 	
 	registerListener: (listener) ->
 		@_eventListeners.push(listener)
@@ -185,7 +198,8 @@ class Model.BuddyNetwork
 	getInfo: (buddyId) -> throw EOVR
 	getLastSong: (buddyId) -> throw EOVR
 	getLiveFeed: (buddyId) -> throw EOVR
-	# getHistoricFeed: (buddyId, fromTime, toTime) - implement in sub class if supported
+	# getHistoricFeed: (buddyId, from, to) # from, to = Date objects; implement in sub class if supported
+	# hasHistoricData: (buddyId, date) # date = Date object; implement if getHistoricFeed() is implemented
 	getBuddies: (buddyId) -> throw EOVR # returns array of buddyId's
 	registerListener: (listener, buddyId) -> throw EOVR
 	removeListener: (listener, buddyId) -> throw EOVR
@@ -204,7 +218,7 @@ class Model.Radio
 		@buddyManager.registerListener(@_handleBuddyManagerEvent)
 		@_currentStream = null
 		@_eventListeners = []
-		@_feedEnabledBuddies = {} # map username -> SongFeed
+		@_feedEnabledBuddies = {} # map username -> {feed: SongFeed, type: "live|historic"}
 		@_feedCombinator = new Model.AlternatingSongFeedCombinator()
 		@_feedCombinator.registerListener(@_handleFeedCombinatorEvent)
 		# TODO clean up now and then (problem: when?)
@@ -215,39 +229,60 @@ class Model.Radio
 		@loadSettings()
 		
 	_settingsStorageKey: "buddyRadio_Settings"
-		
-	tune: (buddy) ->
+	
+	# TODO if multiple feeds are played and one historic feed ends, this feed's end isn't visible in UI
+	#      -> add listener to individual non-live-feeds (endOfFeed event) so that they can be forwarded
+	# TODO skipping a song in historic mode would work better with a 1-song-preload
+	
+	# from = to = null -> live
+	tune: (buddy, from = null, to = null) ->
+		historic = from? and to?
 		if @isFeedEnabled(buddy)
+			newFeedType = if historic then "historic" else "live"
+			feed = @_feedEnabledBuddies[buddy.username]
 			@tuneOut(buddy)
-		else
-			if buddy.listeningStatus == "disabled"
-				listener("errorTuningIn", {buddy, reason: "disabled"}) for listener in @_eventListeners
+			# stop if live -> live or historic -> live
+			# this logic should probably belong somewhere else and be a bit more concise
+			if newFeedType == "live"
 				return
-			feed = buddy.getLiveFeed()
-			@_feedCombinator.addFeed(feed)
-			@_feedEnabledBuddies[buddy.username] = feed
+
+		if buddy.listeningStatus == "disabled"
+			listener("errorTuningIn", {buddy, reason: "disabled"}) for listener in @_eventListeners
+			return
 			
-			listener("tunedIn", buddy) for listener in @_eventListeners
-			
-			if @_currentStream == null
-				@_currentStream = new Model.SongFeedStream(@_feedCombinator, @streamingNetworks)
-				@_currentStream.registerListener(@_handleSongFeedStreamEvent)
-				console.debug("starting new stream")
-				result = @_currentStream.startStreaming()
-				console.debug("stream returned: #{result.status}")
+		feed = 
+			if historic
+				buddy.getHistoricFeed(from, to)
+			else
+				buddy.getLiveFeed()
+		@_feedCombinator.addFeed(feed)
+		@_feedEnabledBuddies[buddy.username] = 
+			if historic
+				{ feed, type: "historic", from, to}
+			else
+				{ feed, type: "live" }
+		
+		listener("tunedIn", buddy) for listener in @_eventListeners
+		
+		if not @_currentStream?
+			@_currentStream = new Model.SongFeedStream(@_feedCombinator, @streamingNetworks)
+			@_currentStream.registerListener(@_handleSongFeedStreamEvent)
+			console.debug("starting new stream")
+			result = @_currentStream.startStreaming()
+			console.debug("stream returned: #{result.status}")
 #				if result.status == "endOfFeed"
 #					listener("streamCompleted") for listener in @_eventListeners
 #					console.info("stream completed")
-				if result.status == "stopRequest"
-					# TODO duplicated code
-					oldOnAirBuddy = @onAirBuddy
-					@onAirBuddy = null
-					listener("nobodyPlaying", {lastPlayingBuddy: oldOnAirBuddy}) for listener in @_eventListeners
-					console.info("stream stopped")
-	
+			if result.status == "stopRequest"
+				# TODO duplicated code
+				oldOnAirBuddy = @onAirBuddy
+				@onAirBuddy = null
+				listener("nobodyPlaying", {lastPlayingBuddy: oldOnAirBuddy}) for listener in @_eventListeners
+				console.info("stream stopped")
+					
 	tuneOut: (buddy, reason = "request") ->
 		if @isFeedEnabled(buddy)
-			@_feedCombinator.removeFeed(@_feedEnabledBuddies[buddy.username])
+			@_feedCombinator.removeFeed(@_feedEnabledBuddies[buddy.username].feed)
 			delete @_feedEnabledBuddies[buddy.username]
 			listener("tunedOut", {buddy, reason}) for listener in @_eventListeners
 			if Object.keys(@_feedEnabledBuddies).length == 0
@@ -260,6 +295,11 @@ class Model.Radio
 		
 	isFeedEnabled: (buddy) ->
 		@_feedEnabledBuddies.hasOwnProperty(buddy.username)
+		
+	getFeedType: (buddy) ->
+		if not @isFeedEnabled(buddy)
+			throw new Error("feed isn't enabled!!")
+		@_feedEnabledBuddies[buddy.username].type
 		
 	isOnAir: (buddy) ->
 		buddy == @onAirBuddy
@@ -295,7 +335,7 @@ class Model.Radio
 			console.debug("song '#{data.song}' feeded from #{username}")
 	
 	_getUsernameByFeed: (feed) ->
-		Object.keys(@_feedEnabledBuddies).filter((username) => @_feedEnabledBuddies[username] == feed)[0]
+		Object.keys(@_feedEnabledBuddies).filter((username) => @_feedEnabledBuddies[username].feed == feed)[0]
 	
 	_getUsernameBySong: (song) ->
 		Object.keys(@_feededSongs).filter((username) => @_feededSongs[username].indexOf(song) != -1)[0]
@@ -571,8 +611,15 @@ class Model.GroovesharkSongResource extends Model.SongResource
 class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 	constructor: () ->
 		super()
+		waitfor
+			while not Grooveshark?
+				console.debug("Grooveshark JS API not available yet, waiting...")
+				hold(500)
+		else
+			hold(10000)
+			throw new Error("Grooveshark JS API not available")
 		if not (Grooveshark.addSongsByID? and Grooveshark.setSongStatusCallback? and Grooveshark.pause? and Grooveshark.removeCurrentSongFromQueue?)
-			throw new Error("Grooveshark API not available or has changed")
+			throw new Error("Grooveshark API has changed")
 		Grooveshark.setSongStatusCallback(@handleGroovesharkEvent)
 
 	findSongResource: (artist, title, album = null) ->
@@ -591,8 +638,11 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		songResource instanceof Model.GroovesharkSongResource
 			
 	queuedSongResources: []
-	currentSongShouldHaveStartedAt = null # timestamp
-	lastFailedSongResource = null
+	
+	# used for detecting enqueue failures (play()-failures get detected instantly)
+	currentSongShouldHaveStartedAt: null # timestamp
+	
+	lastFailedSongResource: null
 	
 	play: (songResource, dontRetry = false) ->
 		console.debug("playing... Grooveshark songID #{songResource.songId}")
@@ -799,10 +849,34 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	getLiveFeed: (username) ->
 		new Model.LastFmLiveSongFeed(username, @)
 		
-	getHistoricFeed: (username, fromTime, toTime) ->
-		if fromTime == null or toTime == null
+	getHistoricFeed: (username, from, to) ->
+		if not from? or not to?
 			throw new Error("wrong parameters")
-		new Model.LastFmHistoricSongFeed(username, @, fromTime, toTime)
+		new Model.LastFmHistoricSongFeed(username, @, from, to)
+	
+	# TODO cache data
+	hasHistoricData: (username, date) ->
+		try
+			from = Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0) / 1000)
+			to = Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59) / 1000)
+			response = LastFmApi.get({
+				method: "user.getRecentTracks",
+				user: username,
+				from, to,
+				limit: 1
+			})
+			if not response.track?
+				return false
+			# looks like we don't get an array if it's just one track...why?? stupid...
+			# remember: the nowplaying track can exist (which will make it 2 songs)
+			if not (response.track instanceof Array)
+				response.track = [response.track]
+			response.track.some((track) -> not track["@attr"]?.nowplaying)
+		catch e
+			if e.code == 4
+				false
+			else
+				throw e
 			
 	registerListener: (listener, username) ->
 		user = username.toLowerCase()
@@ -1001,10 +1075,10 @@ class Model.LastFmLiveSongFeed extends Model.LastFmSongFeed
 			@_currentSongsIdx = @_currentSongsIdx - newStartIdx
 		
 class Model.LastFmHistoricSongFeed extends Model.LastFmSongFeed
-	constructor: (@username, @lastFmNetwork, @fromTime, @toTime) ->
+	constructor: (@username, @lastFmNetwork, @from, @to) ->
 		super()
 		response = @_getPage(1)
-		if response == null
+		if not response?
 			throw new Error("listening history disabled")
 		@page = response["@attr"].totalPages		
 
@@ -1014,38 +1088,40 @@ class Model.LastFmHistoricSongFeed extends Model.LastFmSongFeed
 		if @page < 1
 			return
 		response = @_getPage(@page)
-		if response == null
+		if not response?
 			return
 		@page--
-		tracks = (response.track or []).reverse()
+		if not (response.track instanceof Array)
+			response.track = [response.track]
+		tracks = response.track.reverse()
 		@_addSong(
 			new Model.Song(
 				track.artist["#text"],
 				track.name,
+				track.album?["#text"],
 				track.date.uts
 			)
 		) for track in tracks when not track["@attr"]?.nowplaying
 			
 	_getPage: (page) ->
-		response = null
 		try
-			response = LastFmApi.get({
+			LastFmApi.get({
 				method: "user.getRecentTracks",
 				user: @username,
-				from: @fromTime,
-				to: @toTime,
+				from: Math.round(@from.getTime() / 1000),
+				to: Math.round(@to.getTime() / 1000),
 				page: page
 			})
 		catch e
 			if e.code == 4
-				return null
+				null
 			else
 				throw e
-		response
 View = {}
 
 class View.BuddySidebarSection
-	constructor: (@radio, @controller) ->
+	constructor: (@controller) ->
+		@radio = @controller.radio
 		@radio.registerListener(@handleRadioEvent)
 		@radio.buddyManager.registerListener(@handleBuddyManagerEvent)
 		@init()
@@ -1073,13 +1149,15 @@ class View.BuddySidebarSection
 				alert("The buddy with username #{data.username} couldn't be found.")
 	
 	_applyStyle: (buddy) ->
-		if not buddy
+		if not buddy?
 			return
 		el = $("li.sidebar_buddy[rel='#{buddy.network.className}-#{buddy.username}']")
-		el.removeClass("buddy_nowplaying buddy_feedenabled buddy_live buddy_off buddy_disabled")
+		el.removeClass("buddy_nowplaying buddy_feedenabled buddy_feedenabled_historic buddy_live buddy_off buddy_disabled")
 		classes = "buddy_#{buddy.listeningStatus}"
 		if @radio.isFeedEnabled(buddy)
 			classes += " buddy_feedenabled"
+			if @radio.getFeedType(buddy) == "historic"
+				classes += " buddy_feedenabled_historic"
 		if @radio.isOnAir(buddy)
 			classes += " buddy_nowplaying"
 		el.addClass(classes)
@@ -1107,8 +1185,11 @@ class View.BuddySidebarSection
 			}
 			.sidebar_buddy a .icon {
 				/* Some icons by Yusuke Kamiyamane. All rights reserved. Licensed under Creative Commons Attribution 3.0. */
-				background: url(data:image/png;base64,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)
+				background: url(data:image/png;base64,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)
 				            no-repeat scroll 0 0 transparent;
+			}
+			.sidebar_buddy a .icon:hover, .sidebar_buddy.buddy_nowplaying.buddy_feedenabled_historic a .icon:hover {
+				background-position: -64px 0 !important;
 			}
 			.sidebar_buddy a:hover {
 				background-color: #FFDFBF;
@@ -1127,11 +1208,17 @@ class View.BuddySidebarSection
 				color: #FFFFFF !important;
 			}
 			.sidebar_buddy a:active .icon.remove {
-				background-position: -32px -16px;
+				background-position: -32px -16px !important;
 				display: block;
 			}
 			.buddy_nowplaying a .icon {
 				background-position: 0 0 !important;
+			}
+			.buddy_nowplaying.buddy_feedenabled_historic a .icon {
+				background-position: -80px -16px !important;
+			}
+			.buddy_feedenabled.buddy_feedenabled_historic a .icon {
+				background-position: -80px 0;
 			}
 			.buddy_feedenabled a .label {
 				font-weight: bold;
@@ -1215,8 +1302,12 @@ class View.BuddySidebarSection
 					onConfirmAddBuddy()
 			)
 			onConfirmImportBuddies = () =>
+				username = $("#buddyradio_importusers")[0].value
+				if not username
+					alert("You need to enter the user name from which you want to import the Last.fm buddies.")
+					return
 				$("#buddyradio_importusersbutton span").html("Importing Buddies...")
-				result = @controller.importBuddies("Model.LastFmBuddyNetwork", $("#buddyradio_importusers")[0].value)
+				result = @controller.importBuddies("Model.LastFmBuddyNetwork", username)
 				if result.error == "invalid_user"
 					alert("The user name you entered doesn't exist on Last.fm!")
 				$("#buddyradio_newuserform").remove()
@@ -1286,17 +1377,24 @@ class View.BuddySidebarSection
 				else if status == "OFF" and buddy.lastSong?
 					status += ", last listened to: #{song}"
 			$("#sidebar_buddyradio").append("""
-				<li title="#{buddy.username} (#{buddy.network.name}) - #{status}" rel="#{buddy.network.className}-#{buddy.username}" class="sidebar_buddy buddy sidebar_link">
+				<li rel="#{buddy.network.className}-#{buddy.username}" class="sidebar_buddy buddy sidebar_link">
 					<a href="">
 						<span class="icon remove"></span>
-						<span class="icon"></span>
-						<span class="label ellipsis">#{buddy.username}</span>
+						<span class="icon more"></span>
+						<span class="label ellipsis" title="#{buddy.username} (#{buddy.network.name}) - #{status}">#{buddy.username}</span>
 					</a>
 				</li>
 			""")
 			@_applyStyle(buddy)
 		) for buddy in sortedBuddies
 		
+		$("li.sidebar_buddy .more").click((event) =>
+			event.preventDefault()
+			event.stopPropagation()
+			entry = $(event.currentTarget).parent().parent()
+			[networkClassName, username] = entry.attr("rel").split("-")
+			@_showMoreMenu(networkClassName, username)
+		)
 		$("li.sidebar_buddy .remove").click((event) =>
 			event.preventDefault()
 			event.stopPropagation()
@@ -1309,12 +1407,76 @@ class View.BuddySidebarSection
 			[networkClassName, username] = $(event.currentTarget).attr("rel").split("-")
 			@controller.tune(networkClassName, username)
 		)
+	
+	_currentlyOpenedMenu: null
+	
+	_showMoreMenu: (networkClassName, username) =>
+		buddy = @controller.getBuddy(networkClassName, username)
+		if $("#buddyradio_more").length == 1
+			$("#buddyradio_more").remove()
+			if @_currentlyOpenedMenu == buddy
+				@_currentlyOpenedMenu = null
+				return
+		@_currentlyOpenedMenu = buddy
+		position = $("li.sidebar_buddy[rel='#{networkClassName}-#{username}'] .more").offset()
+		if not position?
+			return		
+		$("body").append("""
+		<div id="buddyradio_more" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 260px; height:80px" class="buddyradio_overlay">
+			<div>
+				<img style="float:left; padding-right:10px;" src="#{buddy.avatarUrl}" />
+				<button type="button" class="btn_style1 viewprofile">
+					<span>View Profile on #{buddy.network.name}</span>
+				</button>
+			</div>
+		</div>
+		""")
+		$("#buddyradio_more button.viewprofile").click(() =>
+			# FIXME scrolls current page to top, why??
+			window.open(buddy.profileUrl)
+			$("#buddyradio_more").remove()
+			@_currentlyOpenedMenu = null
+		)
+		
+		if buddy.supportsHistoricFeed()
+			$("#buddyradio_more").append("""
+			<div style="clear:both;padding-top: 10px">
+				<button type="button" class="btn_style1 fetchlastweek">
+					<span>Listen previously played songs</span>
+				</button>
+				<div class="lastweekdata" style="clear:both"></div>
+			</div>
+			""")
+			$("#buddyradio_more button.fetchlastweek").click(() =>
+				$("#buddyradio_more").css("height", 140)
+				$("#buddyradio_more button.fetchlastweek span").html("Checking last week...")
+				# check last 7 days for song data
+				el = $("#buddyradio_more .lastweekdata")
+				today = new Date()
+				todaysDay = today.getDate()
+				(
+					date = new Date(today.getFullYear(), today.getMonth(), day)
+					if buddy.hasHistoricData(date)
+						el.append("""
+						<a rel="#{date.getTime()}">Listen songs from #{date.toDateString()}</a><br />
+						""")
+					else
+						el.append("No songs played #{date.toDateString()}<br />")
+				) for day in [todaysDay...todaysDay-7]
+			
+				$("#buddyradio_more button.fetchlastweek").remove()
+				$("#buddyradio_more .lastweekdata a").click((event) =>
+					$("#buddyradio_more").remove()
+					from = new Date(parseInt($(event.currentTarget).attr("rel")))
+					to = new Date(from.getFullYear(), from.getMonth(), from.getDate(), 23, 59, 59)
+					@controller.tuneHistoric(networkClassName, username, from, to)					
+				)
+			)
 Controller = {}
 
 class Controller.Radio
 	constructor: (@buddyNetworks, @streamingNetworks) ->
 		@radio = new Model.Radio(@buddyNetworks, @streamingNetworks)
-		@view = new View.BuddySidebarSection(@radio, @)
 	
 	start: () ->
 		@radio.buddyManager.loadLocal()
@@ -1327,6 +1489,10 @@ class Controller.Radio
 		if networkClassName and username
 			@radio.buddyManager.removeBuddy(@radio.buddyManager.getBuddy(networkClassName, username))
 			
+	getBuddy: (networkClassName, username) ->
+		if networkClassName and username
+			@radio.buddyManager.getBuddy(networkClassName, username)
+			
 	importBuddies: (networkClassName, username) ->
 		if networkClassName and username
 			@radio.buddyManager.importBuddies(networkClassName, username)
@@ -1334,6 +1500,10 @@ class Controller.Radio
 	tune: (networkClassName, username) ->
 		if networkClassName and username
 			@radio.tune(@radio.buddyManager.getBuddy(networkClassName, username))
+	
+	tuneHistoric: (networkClassName, username, from, to) ->
+		if networkClassName and username and from instanceof Date and to instanceof Date
+			@radio.tune(@radio.buddyManager.getBuddy(networkClassName, username), from, to)
 			
 	setSongsPerFeedInARow: (count) ->
 		if count? and count > 0
