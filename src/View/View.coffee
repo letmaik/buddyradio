@@ -1,11 +1,30 @@
 View = {}
 
+# TODO add some info in more-overlay about current play mode (live|historic) and songs
+#      if historic feed, then display x of y songs played (z%)
+
 class View.BuddySidebarSection
 	constructor: (@controller) ->
 		@radio = @controller.radio
 		@radio.registerListener(@handleRadioEvent)
 		@radio.buddyManager.registerListener(@handleBuddyManagerEvent)
 		@init()
+		
+		# don't know of any better method
+		@_cprInProgress = false
+		@_lifesLeft = 9
+		$(document).bind("DOMNodeRemoved", (e) =>
+			# can't check for e.target.id, because 'sidebar_buddyradio_wrapper' never appears
+			if $("#sidebar_buddyradio_wrapper").length == 0 and not @_cprInProgress and @_lifesLeft > 0
+				@_cprInProgress = true
+				console.warn("OMG! We were killed!")
+				hold(1000)
+				@_lifesLeft--
+				console.warn("Phew... #{@_lifesLeft} lifes left")
+				@init()
+				@refresh()
+				@_cprInProgress = false
+		)
 		
 	handleRadioEvent: (name, data) =>
 		if name == "tunedIn"
@@ -129,7 +148,7 @@ class View.BuddySidebarSection
 		<div id="sidebar_buddyradio_wrapper" class="listWrapper">
             <div class="divider" style="display: block;">
                 <span class="sidebarHeading">Buddy Radio
-					<a id="buddyradio_settingsLink">&gt; Settings</a>
+					<a id="buddyradio_settingsLink">Settings</a>
 				</span>
                 <a class="sidebarNew"><span>Add Buddy</span></a>
             </div>
@@ -233,6 +252,7 @@ class View.BuddySidebarSection
 				$("#buddyradio_settingsform").remove()
 			)
 		)
+		
 	refresh: () ->
 		console.debug("refreshing view")
 		$("#sidebar_buddyradio").empty()

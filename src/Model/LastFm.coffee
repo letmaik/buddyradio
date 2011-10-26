@@ -191,13 +191,18 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 
 class Model.LastFmSongFeed extends Model.SongFeed
 	constructor: () ->
+		super()
 		@_songs = []
 		@_songsQueuedLength = 0
-		@_currentSongsIdx = -1		
+		@_currentSongsIdx = -1
+		@_endOfFeedEventSent = false
 	
 	hasNext: () ->
 		if @_songsQueuedLength == 0
 			@_updateFeed()
+		if @_songsQueuedLength == 0 and not @hasOpenEnd() and not @_endOfFeedEventSent
+			listener("endOfFeed", @) for listener in @_eventListeners
+			@_endOfFeedEventSent = true
 		@_songsQueuedLength > 0
 		
 	next: () ->

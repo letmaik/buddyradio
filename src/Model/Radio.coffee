@@ -25,8 +25,6 @@ class Model.Radio
 		
 	_settingsStorageKey: "buddyRadio_Settings"
 	
-	# TODO if multiple feeds are played and one historic feed ends, this feed's end isn't visible in UI
-	#      -> add listener to individual non-live-feeds (endOfFeed event) so that they can be forwarded
 	# TODO skipping a song in historic mode would work better with a 1-song-preload
 	
 	# from = to = null -> live
@@ -44,12 +42,19 @@ class Model.Radio
 		if buddy.listeningStatus == "disabled"
 			listener("errorTuningIn", {buddy, reason: "disabled"}) for listener in @_eventListeners
 			return
-			
+		
 		feed = 
 			if historic
 				buddy.getHistoricFeed(from, to)
 			else
 				buddy.getLiveFeed()
+		feed.registerListener((name, data) =>
+			if name == "endOfFeed"
+				username = @_getUsernameByFeed(data)
+				# FIXME hacky
+				buddy = @buddyManager.buddies.filter((buddy) -> buddy.username == username)[0]
+				@tuneOut(buddy, "endOfFeed")
+		)
 		@_feedCombinator.addFeed(feed)
 		@_feedEnabledBuddies[buddy.username] = 
 			if historic
