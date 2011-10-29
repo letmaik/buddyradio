@@ -34,3 +34,7 @@ class Controller.Radio
 	setSongsPerFeedInARow: (count) ->
 		if count? and count > 0
 			@radio.setSongsPerFeedInARow(count)
+	
+	setPreloadCount: (count) ->
+		if count? and count >= 0
+			@radio.setPreloadCount(count)

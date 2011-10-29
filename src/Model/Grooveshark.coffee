@@ -79,6 +79,8 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		Grooveshark.addSongsByID([songResource.songId])		
 		
 	getPlayingPosition: (songResource) ->
+		# TODO cleanup() needs to be called in background continuously, otherwise it could get stuck if preloadCount>0
+		#      -> not possible ATM because of missing spawn support
 		@cleanup()
 		gsSong = Grooveshark.getCurrentSongStatus().song
 		if gsSong? and gsSong.songID == songResource.songId

@@ -81,7 +81,6 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 			throw new Error("wrong parameters")
 		new Model.LastFmHistoricSongFeed(username, @, from, to)
 	
-	# TODO cache data
 	hasHistoricData: (username, date) ->
 		try
 			from = Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0) / 1000)
@@ -192,6 +191,7 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 class Model.LastFmSongFeed extends Model.SongFeed
 	constructor: () ->
 		super()
+		@feededCount = 0
 		@_songs = []
 		@_songsQueuedLength = 0
 		@_currentSongsIdx = -1
@@ -208,6 +208,7 @@ class Model.LastFmSongFeed extends Model.SongFeed
 	next: () ->
 		if @_songsQueuedLength == 0
 			throw new Error("no more songs available!")
+		@feededCount++
 		@_currentSongsIdx++
 		@_songsQueuedLength--
 		console.debug("feed queue: #{@_songs[@_currentSongsIdx...@_songs.length]}")
@@ -312,7 +313,8 @@ class Model.LastFmHistoricSongFeed extends Model.LastFmSongFeed
 		response = @_getPage(1)
 		if not response?
 			throw new Error("listening history disabled")
-		@page = response["@attr"].totalPages		
+		@page = response["@attr"].totalPages	
+		@totalCount = response["@attr"].total
 
 	hasOpenEnd: () -> false
 		

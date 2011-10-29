@@ -1,8 +1,5 @@
 View = {}
 
-# TODO add some info in more-overlay about current play mode (live|historic) and songs
-#      if historic feed, then display x of y songs played (z%)
-
 class View.BuddySidebarSection
 	constructor: (@controller) ->
 		@radio = @controller.radio
@@ -223,21 +220,27 @@ class View.BuddySidebarSection
 				return
 				
 			position = newButton.offset()
-			songsPerFeedInARow = @radio.getSongsPerFeedInARow()
+			
 			songsPerFeedInARowValues = [1,2,3,4,5,10,15,20,30,40,50,100]
-			options = songsPerFeedInARowValues.map((n) ->
-				sel = if songsPerFeedInARow == n then " selected" else ""
-				"<option value=\"#{n}\"#{sel}>#{n}</option>"
-			).join()
+			optionsSongsPerFeed = @_constructOptions(songsPerFeedInARowValues, @radio.getSongsPerFeedInARow())
+			
+			optionsPreload = @_constructOptions([0..5], @radio.getPreloadCount())
 			
 			$("body").append("""
-			<div id="buddyradio_settingsform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 300px; height:60px" class="buddyradio_overlay">
+			<div id="buddyradio_settingsform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 310px" class="buddyradio_overlay">
 				<div>
 					Play 
 					<select name="songsPerFeedInARow">
-						#{options}
+						#{optionsSongsPerFeed}
 					</select>
 					song/s in a row from same buddy
+				</div>
+				<div style="margin-top: 5px">
+					Preload
+					<select name="preloadCount">
+						#{optionsPreload}
+					</select>
+					song/s when playing historic radio
 				</div>
 				<div style="padding-top:10px">
 					<button type="button" class="btn_style1">
@@ -247,11 +250,19 @@ class View.BuddySidebarSection
 			</div>
 			""")
 			$("#buddyradio_settingsform button").click(() =>
-				count = $("#buddyradio_settingsform select[name=songsPerFeedInARow]")[0].value
-				@controller.setSongsPerFeedInARow(parseInt(count))
+				songsPerFeed = $("#buddyradio_settingsform select[name=songsPerFeedInARow]")[0].value
+				preloadCount = $("#buddyradio_settingsform select[name=preloadCount]")[0].value		
+				@controller.setSongsPerFeedInARow(parseInt(songsPerFeed))
+				@controller.setPreloadCount(parseInt(preloadCount))
 				$("#buddyradio_settingsform").remove()
 			)
 		)
+	
+	_constructOptions: (options, selected = null) ->
+		options.map((n) ->
+			sel = if selected == n then " selected" else ""
+			"<option value=\"#{n}\"#{sel}>#{n}</option>"
+		).join()
 		
 	refresh: () ->
 		console.debug("refreshing view")
@@ -321,10 +332,24 @@ class View.BuddySidebarSection
 		@_currentlyOpenedMenu = buddy
 		position = $("li.sidebar_buddy[rel='#{networkClassName}-#{username}'] .more").offset()
 		if not position?
-			return		
+			return
+		
+		feedInfo = ""
+		if @radio.isFeedEnabled(buddy)
+			feedType = @radio.getFeedType(buddy)
+			feedInfo = """
+				<div style="margin-bottom:10px">Tuned into <strong>#{feedType}</strong> radio.<br />
+			"""
+			if feedType == "historic"
+				feedInfo += "#{@radio.getAlreadyFeededCount(buddy)} of #{@radio.getTotalCountForHistoricFeed(buddy)} songs enqueued so far."
+			else
+				feedInfo += "#{@radio.getAlreadyFeededCount(buddy)} songs enqueued so far."
+			feedInfo += "</div>"
+				
 		$("body").append("""
-		<div id="buddyradio_more" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 260px; height:80px" class="buddyradio_overlay">
-			<div>
+		<div id="buddyradio_more" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 260px" class="buddyradio_overlay">
+			#{feedInfo}
+			<div class="buttons">
 				<img style="float:left; padding-right:10px;" src="#{buddy.avatarUrl}" />
 				<button type="button" class="btn_style1 viewprofile">
 					<span>View Profile on #{buddy.network.name}</span>
@@ -340,17 +365,16 @@ class View.BuddySidebarSection
 		)
 		
 		if buddy.supportsHistoricFeed()
-			$("#buddyradio_more").append("""
-			<div style="clear:both;padding-top: 10px">
-				<button type="button" class="btn_style1 fetchlastweek">
+			$("#buddyradio_more div.buttons").append("""
+				<button style="margin-top: 5px" type="button" class="btn_style1 fetchlastweek">
 					<span>Listen previously played songs</span>
 				</button>
+			""")
+			$("#buddyradio_more").append("""
 				<div class="lastweekdata" style="clear:both"></div>
-			</div>
 			""")
 			$("#buddyradio_more button.fetchlastweek").click(() =>
-				$("#buddyradio_more").css("height", 140)
-				$("#buddyradio_more button.fetchlastweek span").html("Checking last week...")
+				$("#buddyradio_more button.fetchlastweek span").html("Checking last week's songs...")
 				# check last 7 days for song data
 				el = $("#buddyradio_more .lastweekdata")
 				today = new Date()

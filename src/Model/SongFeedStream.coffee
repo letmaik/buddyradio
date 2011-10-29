@@ -1,5 +1,6 @@
 class Model.SongFeedStream
-	constructor: (@songFeed, @streamingNetworks) ->
+	# preloadCount: if feed doesn't have an open end (=isn't live) then x songs will be preloaded/queued
+	constructor: (@songFeed, @streamingNetworks, @preloadCount = 1) ->
 		network.registerListener(@_handleStreamingNetworkEvent) for network in @streamingNetworks
 		@stopRequest = false
 		@queue = [] # array of {song, resource}
@@ -43,8 +44,12 @@ class Model.SongFeedStream
 						if network.enqueue and lastSongStreamedNetwork == network and @queue.length > 0
 							@queue.push({song, resource: preferredResource})
 							network.enqueue(preferredResource)
-							console.log("waiting")
-							@_waitUntilEndOfQueue(0.9)
+							if @songFeed.hasOpenEnd() or @preloadCount == 0
+								console.log("waiting")
+								@_waitUntilEndOfQueue(0.9)
+							else
+								console.log("waiting until queue gets smaller (then: preload new song)")
+								@_waitUntilQueueLessThanOrEqual(@preloadCount)
 						else
 							console.log("waiting 2")
 							@_waitUntilEndOfQueue(1.0)
@@ -52,26 +57,24 @@ class Model.SongFeedStream
 							listener("songPlaying", song) for listener in @_eventListeners
 							network.play(preferredResource)
 							lastSongStreamedNetwork = network
-							console.log("waiting 3")
-							@_waitUntilEndOfQueue(0.9)
+							if not network.enqueue or @songFeed.hasOpenEnd() or @preloadCount == 0
+								console.log("waiting 3")
+								@_waitUntilEndOfQueue(0.9)
 					else
+						# TODO noSongFound event
 						continue # with next song in feed without waiting
 		else
 			waitfor rv
 				@_stopRequestCall = resume
 			return { status: "stopRequest" }
-			
-			
-	dispose: () ->
-		if not @stopRequest
-			throw new Error("can only dispose after streaming was stopped")
-		network.removeListener(@_handleStreamingNetworkEvent) for network in @streamingNetworks
-		@_eventListeners = []
-			
-	_waitUntilEndOfQueue: (factor) ->
-		while @queue.length > 1
-			console.debug("holding on... #{@queue.length} songs in queue")
+	
+	_waitUntilQueueLessThanOrEqual: (count) ->
+		while @queue.length > count
+			console.debug("holding on... #{@queue.length} songs in queue (target: #{count})")
 			hold(5000)
+	
+	_waitUntilEndOfQueue: (factor) ->
+		@_waitUntilQueueLessThanOrEqual(1)
 		if @queue.length == 0
 			return
 		
@@ -116,11 +119,7 @@ class Model.SongFeedStream
 				resources[0]
 			else
 				matchingResource[0]
-		
-	# TODO
-#	isAlternativeSong: false
-#	noSongFound: false
-				
+					
 	_handleStreamingNetworkEvent: (name, data) =>
 		if ["streamingSkipped", "streamingCompleted", "streamingFailed"].indexOf(name) != -1 and @queue[0].resource == data	
 			if name == "streamingSkipped"
@@ -134,3 +133,9 @@ class Model.SongFeedStream
 				listener("songPlaying", @queue[0].song) for listener in @_eventListeners
 			else
 				listener("nothingPlaying") for listener in @_eventListeners
+				
+	dispose: () ->
+		if not @stopRequest
+			throw new Error("can only dispose after streaming was stopped")
+		network.removeListener(@_handleStreamingNetworkEvent) for network in @streamingNetworks
+		@_eventListeners = []

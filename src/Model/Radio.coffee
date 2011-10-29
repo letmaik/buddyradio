@@ -20,13 +20,12 @@ class Model.Radio
 		#      -> not when "nothingPlaying" received, doesn't work if networks only support play()
 		#         because between songs this event will occur!
 		@_feededSongs = {} # map username -> [songs]
+		@_preloadCount = 1
 		@onAirBuddy = null
 		@loadSettings()
 		
 	_settingsStorageKey: "buddyRadio_Settings"
-	
-	# TODO skipping a song in historic mode would work better with a 1-song-preload
-	
+		
 	# from = to = null -> live
 	tune: (buddy, from = null, to = null) ->
 		historic = from? and to?
@@ -65,7 +64,7 @@ class Model.Radio
 		listener("tunedIn", buddy) for listener in @_eventListeners
 		
 		if not @_currentStream?
-			@_currentStream = new Model.SongFeedStream(@_feedCombinator, @streamingNetworks)
+			@_currentStream = new Model.SongFeedStream(@_feedCombinator, @streamingNetworks, @_preloadCount)
 			@_currentStream.registerListener(@_handleSongFeedStreamEvent)
 			console.debug("starting new stream")
 			result = @_currentStream.startStreaming()
@@ -101,6 +100,14 @@ class Model.Radio
 			throw new Error("feed isn't enabled!!")
 		@_feedEnabledBuddies[buddy.username].type
 		
+	getTotalCountForHistoricFeed: (buddy) ->
+		if @getFeedType(buddy) != "historic"
+			throw new Error("feed isn't historic!")
+		@_feedEnabledBuddies[buddy.username].feed.totalCount
+
+	getAlreadyFeededCount: (buddy) ->
+		@_feedEnabledBuddies[buddy.username].feed.feededCount
+		
 	isOnAir: (buddy) ->
 		buddy == @onAirBuddy
 	
@@ -110,14 +117,28 @@ class Model.Radio
 	setSongsPerFeedInARow: (count) ->
 		@_feedCombinator.songsPerFeedInARow = count
 		@saveSettings()
+	
+	getPreloadCount: () ->
+		@_preloadCount
+	
+	setPreloadCount: (count) ->
+		@_preloadCount = count
+		if @_currentStream?
+			@_currentStream.preloadCount = count
+		@saveSettings()
 		
 	loadSettings: () ->
 		settings = JSON.parse(localStorage[@_settingsStorageKey] or "{}")
 		if settings.hasOwnProperty("songsPerFeedInARow")
 			@setSongsPerFeedInARow(settings.songsPerFeedInARow)
+		if settings.hasOwnProperty("preloadCount")
+			@_preloadCount = settings.preloadCount
 	
 	saveSettings: () ->
-		settings = {songsPerFeedInARow: @getSongsPerFeedInARow()}
+		settings = {
+			songsPerFeedInARow: @getSongsPerFeedInARow(),
+			preloadCount: @_preloadCount
+		}
 		localStorage[@_settingsStorageKey] = JSON.stringify(settings)
 	
 	_handleBuddyManagerEvent: (name, data) =>

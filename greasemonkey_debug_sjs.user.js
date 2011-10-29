@@ -349,6 +349,7 @@ function loadRadio() {
       this._feedCombinator = new Model.AlternatingSongFeedCombinator();
       this._feedCombinator.registerListener(this._handleFeedCombinatorEvent);
       this._feededSongs = {};
+      this._preloadCount = 1;
       this.onAirBuddy = null;
       this.loadSettings();
     }
@@ -376,6 +377,16 @@ function loadRadio() {
         return;
       }
       feed = historic ? buddy.getHistoricFeed(from, to) : buddy.getLiveFeed();
+      feed.registerListener(__bind(function(name, data) {
+        var username;
+        if (name === "endOfFeed") {
+          username = this._getUsernameByFeed(data);
+          buddy = this.buddyManager.buddies.filter(function(buddy) {
+            return buddy.username === username;
+          })[0];
+          return this.tuneOut(buddy, "endOfFeed");
+        }
+      }, this));
       this._feedCombinator.addFeed(feed);
       this._feedEnabledBuddies[buddy.username] = historic ? {
         feed: feed,
@@ -392,7 +403,7 @@ function loadRadio() {
         listener("tunedIn", buddy);
       }
       if (!(this._currentStream != null)) {
-        this._currentStream = new Model.SongFeedStream(this._feedCombinator, this.streamingNetworks);
+        this._currentStream = new Model.SongFeedStream(this._feedCombinator, this.streamingNetworks, this._preloadCount);
         this._currentStream.registerListener(this._handleSongFeedStreamEvent);
         console.debug("starting new stream");
         result = this._currentStream.startStreaming();
@@ -442,6 +453,15 @@ function loadRadio() {
       if (!this.isFeedEnabled(buddy)) throw new Error("feed isn't enabled!!");
       return this._feedEnabledBuddies[buddy.username].type;
     };
+    Radio.prototype.getTotalCountForHistoricFeed = function(buddy) {
+      if (this.getFeedType(buddy) !== "historic") {
+        throw new Error("feed isn't historic!");
+      }
+      return this._feedEnabledBuddies[buddy.username].feed.totalCount;
+    };
+    Radio.prototype.getAlreadyFeededCount = function(buddy) {
+      return this._feedEnabledBuddies[buddy.username].feed.feededCount;
+    };
     Radio.prototype.isOnAir = function(buddy) {
       return buddy === this.onAirBuddy;
     };
@@ -452,17 +472,29 @@ function loadRadio() {
       this._feedCombinator.songsPerFeedInARow = count;
       return this.saveSettings();
     };
+    Radio.prototype.getPreloadCount = function() {
+      return this._preloadCount;
+    };
+    Radio.prototype.setPreloadCount = function(count) {
+      this._preloadCount = count;
+      if (this._currentStream != null) this._currentStream.preloadCount = count;
+      return this.saveSettings();
+    };
     Radio.prototype.loadSettings = function() {
       var settings;
       settings = JSON.parse(localStorage[this._settingsStorageKey] || "{}");
       if (settings.hasOwnProperty("songsPerFeedInARow")) {
-        return this.setSongsPerFeedInARow(settings.songsPerFeedInARow);
+        this.setSongsPerFeedInARow(settings.songsPerFeedInARow);
+      }
+      if (settings.hasOwnProperty("preloadCount")) {
+        return this._preloadCount = settings.preloadCount;
       }
     };
     Radio.prototype.saveSettings = function() {
       var settings;
       settings = {
-        songsPerFeedInARow: this.getSongsPerFeedInARow()
+        songsPerFeedInARow: this.getSongsPerFeedInARow(),
+        preloadCount: this._preloadCount
       };
       return localStorage[this._settingsStorageKey] = JSON.stringify(settings);
     };
@@ -554,7 +586,9 @@ function loadRadio() {
     return SongResource;
   })();
   Model.SongFeed = (function() {
-    function SongFeed() {}
+    function SongFeed() {
+      this._eventListeners = [];
+    }
     SongFeed.prototype.hasOpenEnd = function() {
       throw EOVR;
     };
@@ -564,6 +598,9 @@ function loadRadio() {
     SongFeed.prototype.next = function() {
       throw EOVR;
     };
+    SongFeed.prototype.registerListener = function(listener) {
+      return this._eventListeners.push(listener);
+    };
     return SongFeed;
   })();
   Model.SequentialSongFeedCombinator = (function() {
@@ -572,7 +609,9 @@ function loadRadio() {
       var feeds;
       feeds = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
       this.feeds = feeds;
+      SequentialSongFeedCombinator.__super__.constructor.call(this);
       if (this.feeds.length === 0) throw new Error("no feeds given!");
+      this.feededCount = 0;
       this._currentFeedIdx = 0;
     }
     SequentialSongFeedCombinator.prototype.hasOpenEnd = function() {
@@ -589,6 +628,7 @@ function loadRadio() {
       }
     };
     SequentialSongFeedCombinator.prototype.next = function() {
+      this.feededCount++;
       return this.feeds[this._currentFeedIdx].next();
     };
     SequentialSongFeedCombinator.prototype.addFeed = function(feed) {
@@ -603,13 +643,11 @@ function loadRadio() {
       songsPerFeedInARow = arguments[0], feeds = 2 <= arguments.length ? __slice.call(arguments, 1) : [];
       this.songsPerFeedInARow = songsPerFeedInARow != null ? songsPerFeedInARow : 1;
       this.feeds = feeds;
+      AlternatingSongFeedCombinator.__super__.constructor.call(this);
+      this.feededCount = 0;
       this._currentFeedIdx = 0;
       this._currentFeedSongsInARow = 0;
-      this._eventListeners = [];
     }
-    AlternatingSongFeedCombinator.prototype.registerListener = function(listener) {
-      return this._eventListeners.push(listener);
-    };
     AlternatingSongFeedCombinator.prototype.hasOpenEnd = function() {
       return this.feeds.some(function(feed) {
         return feed.hasOpenEnd();
@@ -638,6 +676,7 @@ function loadRadio() {
       var listener, song, _i, _len, _ref;
       this._currentFeedSongsInARow++;
       song = this.feeds[this._currentFeedIdx].next();
+      this.feededCount++;
       _ref = this._eventListeners;
       for (_i = 0, _len = _ref.length; _i < _len; _i++) {
         listener = _ref[_i];
@@ -668,10 +707,11 @@ function loadRadio() {
     return AlternatingSongFeedCombinator;
   })();
   Model.SongFeedStream = (function() {
-    function SongFeedStream(songFeed, streamingNetworks) {
+    function SongFeedStream(songFeed, streamingNetworks, preloadCount) {
       var network, _i, _len, _ref;
       this.songFeed = songFeed;
       this.streamingNetworks = streamingNetworks;
+      this.preloadCount = preloadCount != null ? preloadCount : 1;
       this._handleStreamingNetworkEvent = __bind(this._handleStreamingNetworkEvent, this);
       _ref = this.streamingNetworks;
       for (_i = 0, _len = _ref.length; _i < _len; _i++) {
@@ -737,8 +777,13 @@ function loadRadio() {
                   resource: preferredResource
                 });
                 network.enqueue(preferredResource);
-                console.log("waiting");
-                _results.push(this._waitUntilEndOfQueue(0.9));
+                if (this.songFeed.hasOpenEnd() || this.preloadCount === 0) {
+                  console.log("waiting");
+                  _results.push(this._waitUntilEndOfQueue(0.9));
+                } else {
+                  console.log("waiting until queue gets smaller (then: preload new song)");
+                  _results.push(this._waitUntilQueueLessThanOrEqual(this.preloadCount));
+                }
               } else {
                 console.log("waiting 2");
                 this._waitUntilEndOfQueue(1.0);
@@ -753,8 +798,12 @@ function loadRadio() {
                 }
                 network.play(preferredResource);
                 lastSongStreamedNetwork = network;
-                console.log("waiting 3");
-                _results.push(this._waitUntilEndOfQueue(0.9));
+                if (!network.enqueue || this.songFeed.hasOpenEnd() || this.preloadCount === 0) {
+                  console.log("waiting 3");
+                  _results.push(this._waitUntilEndOfQueue(0.9));
+                } else {
+                  _results.push(void 0);
+                }
               }
             } else {
               continue;
@@ -772,24 +821,18 @@ function loadRadio() {
         };
       }
     };
-    SongFeedStream.prototype.dispose = function() {
-      var network, _i, _len, _ref;
-      if (!this.stopRequest) {
-        throw new Error("can only dispose after streaming was stopped");
+    SongFeedStream.prototype._waitUntilQueueLessThanOrEqual = function(count) {
+      var _results;
+      _results = [];
+      while (this.queue.length > count) {
+        console.debug("holding on... " + this.queue.length + " songs in queue (target: " + count + ")");
+        _results.push(hold(5000));
       }
-      _ref = this.streamingNetworks;
-      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-        network = _ref[_i];
-        network.removeListener(this._handleStreamingNetworkEvent);
-      }
-      return this._eventListeners = [];
+      return _results;
     };
     SongFeedStream.prototype._waitUntilEndOfQueue = function(factor) {
       var length, position, songEndsIn, waitingResource;
-      while (this.queue.length > 1) {
-        console.debug("holding on... " + this.queue.length + " songs in queue");
-        hold(5000);
-      }
+      this._waitUntilQueueLessThanOrEqual(1);
       if (this.queue.length === 0) return;
       console.debug("holding on.. until song nearly finished");
       waitingResource = this.queue[0].resource;
@@ -883,6 +926,18 @@ function loadRadio() {
           return _results2;
         }
       }
+    };
+    SongFeedStream.prototype.dispose = function() {
+      var network, _i, _len, _ref;
+      if (!this.stopRequest) {
+        throw new Error("can only dispose after streaming was stopped");
+      }
+      _ref = this.streamingNetworks;
+      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+        network = _ref[_i];
+        network.removeListener(this._handleStreamingNetworkEvent);
+      }
+      return this._eventListeners = [];
     };
     return SongFeedStream;
   })();
@@ -1386,18 +1441,31 @@ function loadRadio() {
   Model.LastFmSongFeed = (function() {
     __extends(LastFmSongFeed, Model.SongFeed);
     function LastFmSongFeed() {
+      LastFmSongFeed.__super__.constructor.call(this);
+      this.feededCount = 0;
       this._songs = [];
       this._songsQueuedLength = 0;
       this._currentSongsIdx = -1;
+      this._endOfFeedEventSent = false;
     }
     LastFmSongFeed.prototype.hasNext = function() {
+      var listener, _i, _len, _ref;
       if (this._songsQueuedLength === 0) this._updateFeed();
+      if (this._songsQueuedLength === 0 && !this.hasOpenEnd() && !this._endOfFeedEventSent) {
+        _ref = this._eventListeners;
+        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+          listener = _ref[_i];
+          listener("endOfFeed", this);
+        }
+        this._endOfFeedEventSent = true;
+      }
       return this._songsQueuedLength > 0;
     };
     LastFmSongFeed.prototype.next = function() {
       if (this._songsQueuedLength === 0) {
         throw new Error("no more songs available!");
       }
+      this.feededCount++;
       this._currentSongsIdx++;
       this._songsQueuedLength--;
       console.debug("feed queue: " + this._songs.slice(this._currentSongsIdx, this._songs.length));
@@ -1501,6 +1569,7 @@ function loadRadio() {
       response = this._getPage(1);
       if (!(response != null)) throw new Error("listening history disabled");
       this.page = response["@attr"].totalPages;
+      this.totalCount = response["@attr"].total;
     }
     LastFmHistoricSongFeed.prototype.hasOpenEnd = function() {
       return false;
@@ -1553,6 +1622,20 @@ function loadRadio() {
       this.radio.registerListener(this.handleRadioEvent);
       this.radio.buddyManager.registerListener(this.handleBuddyManagerEvent);
       this.init();
+      this._cprInProgress = false;
+      this._lifesLeft = 9;
+      $(document).bind("DOMNodeRemoved", __bind(function(e) {
+        if ($("#sidebar_buddyradio_wrapper").length === 0 && !this._cprInProgress && this._lifesLeft > 0) {
+          this._cprInProgress = true;
+          console.warn("OMG! We were killed!");
+          hold(1000);
+          this._lifesLeft--;
+          console.warn("Phew... " + this._lifesLeft + " lifes left");
+          this.init();
+          this.refresh();
+          return this._cprInProgress = false;
+        }
+      }, this));
     }
     BuddySidebarSection.prototype.handleRadioEvent = function(name, data) {
       if (name === "tunedIn") {
@@ -1599,7 +1682,7 @@ function loadRadio() {
     BuddySidebarSection.prototype.init = function() {
       var newButton;
       $("head").append("<style type=\"text/css\">\n	#sidebar_buddyradio_wrapper .divider .sidebarHeading a {\n		display: none;\n	}\n	#sidebar_buddyradio_wrapper .divider:hover .sidebarHeading a {\n		display: inline;\n	}\n	.buddyradio_overlay {\n		background: none repeat scroll 0 0 #FFFFFF;\n		border: 1px solid rgba(0, 0, 0, 0.25);\n		border-radius: 3px 3px 3px 3px;\n		padding: 5px;\n		color: black;\n		max-height: 325px;\n		overflow-x: hidden;\n		overflow-y: auto;\n		position: absolute;\n		z-index: 9999;\n	}\n	.sidebar_buddy a .icon {\n		/* Some icons by Yusuke Kamiyamane. All rights reserved. Licensed under Creative Commons Attribution 3.0. */\n		background: url(data:image/png;base64,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)\n		            no-repeat scroll 0 0 transparent;\n	}\n	.sidebar_buddy a .icon:hover, .sidebar_buddy.buddy_nowplaying.buddy_feedenabled_historic a .icon:hover {\n		background-position: -64px 0 !important;\n	}\n	.sidebar_buddy a:hover {\n		background-color: #FFDFBF;\n	}\n	.sidebar_buddy a:hover .label {\n		margin-right: 20px;\n	}\n	.sidebar_buddy a:hover .icon.remove {\n		background-position: -16px -16px !important;\n		display: block;\n	}\n	.sidebar_buddy a:active {\n		background-color: #FF8000;\n	}\n	.sidebar_buddy a:active .label {\n		color: #FFFFFF !important;\n	}\n	.sidebar_buddy a:active .icon.remove {\n		background-position: -32px -16px !important;\n		display: block;\n	}\n	.buddy_nowplaying a .icon {\n		background-position: 0 0 !important;\n	}\n	.buddy_nowplaying.buddy_feedenabled_historic a .icon {\n		background-position: -80px -16px !important;\n	}\n	.buddy_feedenabled.buddy_feedenabled_historic a .icon {\n		background-position: -80px 0;\n	}\n	.buddy_feedenabled a .label {\n		font-weight: bold;\n	}\n	.buddy_live a .label, .buddy_live a:hover .label {\n		color: #FF8000;\n	}\n	.buddy_live a .icon {\n		background-position: -16px 0;\n	}\n	.buddy_off a .label, .buddy_off a:hover .label {\n		color: black;\n	}\n	.buddy_off a .icon {\n		background-position: -32px 0;\n	}\n	.buddy_disabled a .label, .buddy_disabled a:hover .label {\n		color: gray;\n	}\n	.buddy_disabled a .icon {\n		background-position: -48px 0;\n	}\n</style>");
-      $("#sidebar .container_inner").append("<div id=\"sidebar_buddyradio_wrapper\" class=\"listWrapper\">\n            <div class=\"divider\" style=\"display: block;\">\n                <span class=\"sidebarHeading\">Buddy Radio\n			<a id=\"buddyradio_settingsLink\">&gt; Settings</a>\n		</span>\n                <a class=\"sidebarNew\"><span>Add Buddy</span></a>\n            </div>\n            <ul id=\"sidebar_buddyradio\" class=\"link_group\">\n		<li> \n			<span class=\"label ellipsis\">loading...</span>\n		</li>\n	</ul>\n        </div>");
+      $("#sidebar .container_inner").append("<div id=\"sidebar_buddyradio_wrapper\" class=\"listWrapper\">\n            <div class=\"divider\" style=\"display: block;\">\n                <span class=\"sidebarHeading\">Buddy Radio\n			<a id=\"buddyradio_settingsLink\">Settings</a>\n		</span>\n                <a class=\"sidebarNew\"><span>Add Buddy</span></a>\n            </div>\n            <ul id=\"sidebar_buddyradio\" class=\"link_group\">\n		<li> \n			<span class=\"label ellipsis\">loading...</span>\n		</li>\n	</ul>\n        </div>");
       newButton = $("#sidebar_buddyradio_wrapper .sidebarNew");
       newButton.click(__bind(function() {
         var onConfirmAddBuddy, onConfirmImportBuddies, position;
@@ -1639,27 +1722,33 @@ function loadRadio() {
         }, this));
       }, this));
       return $("#buddyradio_settingsLink").click(__bind(function() {
-        var options, position, songsPerFeedInARow, songsPerFeedInARowValues;
+        var optionsPreload, optionsSongsPerFeed, position, songsPerFeedInARowValues;
         if ($("#buddyradio_settingsform").length === 1) {
           $("#buddyradio_settingsform").remove();
           return;
         }
         position = newButton.offset();
-        songsPerFeedInARow = this.radio.getSongsPerFeedInARow();
         songsPerFeedInARowValues = [1, 2, 3, 4, 5, 10, 15, 20, 30, 40, 50, 100];
-        options = songsPerFeedInARowValues.map(function(n) {
-          var sel;
-          sel = songsPerFeedInARow === n ? " selected" : "";
-          return "<option value=\"" + n + "\"" + sel + ">" + n + "</option>";
-        }).join();
-        $("body").append("<div id=\"buddyradio_settingsform\" style=\"position: absolute; top: " + position.top + "px; left: " + (position.left + 20) + "px; display: block;width: 300px; height:60px\" class=\"buddyradio_overlay\">\n	<div>\n		Play \n		<select name=\"songsPerFeedInARow\">\n			" + options + "\n		</select>\n		song/s in a row from same buddy\n	</div>\n	<div style=\"padding-top:10px\">\n		<button type=\"button\" class=\"btn_style1\">\n			<span>Apply</span>\n		</button>					\n	</div>\n</div>");
+        optionsSongsPerFeed = this._constructOptions(songsPerFeedInARowValues, this.radio.getSongsPerFeedInARow());
+        optionsPreload = this._constructOptions([0, 1, 2, 3, 4, 5], this.radio.getPreloadCount());
+        $("body").append("<div id=\"buddyradio_settingsform\" style=\"position: absolute; top: " + position.top + "px; left: " + (position.left + 20) + "px; display: block;width: 310px\" class=\"buddyradio_overlay\">\n	<div>\n		Play \n		<select name=\"songsPerFeedInARow\">\n			" + optionsSongsPerFeed + "\n		</select>\n		song/s in a row from same buddy\n	</div>\n	<div style=\"margin-top: 5px\">\n		Preload\n		<select name=\"preloadCount\">\n			" + optionsPreload + "\n		</select>\n		song/s when playing historic radio\n	</div>\n	<div style=\"padding-top:10px\">\n		<button type=\"button\" class=\"btn_style1\">\n			<span>Apply</span>\n		</button>					\n	</div>\n</div>");
         return $("#buddyradio_settingsform button").click(__bind(function() {
-          var count;
-          count = $("#buddyradio_settingsform select[name=songsPerFeedInARow]")[0].value;
-          this.controller.setSongsPerFeedInARow(parseInt(count));
+          var preloadCount, songsPerFeed;
+          songsPerFeed = $("#buddyradio_settingsform select[name=songsPerFeedInARow]")[0].value;
+          preloadCount = $("#buddyradio_settingsform select[name=preloadCount]")[0].value;
+          this.controller.setSongsPerFeedInARow(parseInt(songsPerFeed));
+          this.controller.setPreloadCount(parseInt(preloadCount));
           return $("#buddyradio_settingsform").remove();
         }, this));
       }, this));
+    };
+    BuddySidebarSection.prototype._constructOptions = function(options, selected) {
+      if (selected == null) selected = null;
+      return options.map(function(n) {
+        var sel;
+        sel = selected === n ? " selected" : "";
+        return "<option value=\"" + n + "\"" + sel + ">" + n + "</option>";
+      }).join();
     };
     BuddySidebarSection.prototype.refresh = function() {
       var buddy, song, sortedBuddies, status, _i, _len;
@@ -1722,7 +1811,7 @@ function loadRadio() {
     };
     BuddySidebarSection.prototype._currentlyOpenedMenu = null;
     BuddySidebarSection.prototype._showMoreMenu = function(networkClassName, username) {
-      var buddy, position;
+      var buddy, feedInfo, feedType, position;
       buddy = this.controller.getBuddy(networkClassName, username);
       if ($("#buddyradio_more").length === 1) {
         $("#buddyradio_more").remove();
@@ -1734,18 +1823,29 @@ function loadRadio() {
       this._currentlyOpenedMenu = buddy;
       position = $("li.sidebar_buddy[rel='" + networkClassName + "-" + username + "'] .more").offset();
       if (!(position != null)) return;
-      $("body").append("<div id=\"buddyradio_more\" style=\"position: absolute; top: " + position.top + "px; left: " + (position.left + 20) + "px; display: block;width: 260px; height:80px\" class=\"buddyradio_overlay\">\n	<div>\n		<img style=\"float:left; padding-right:10px;\" src=\"" + buddy.avatarUrl + "\" />\n		<button type=\"button\" class=\"btn_style1 viewprofile\">\n			<span>View Profile on " + buddy.network.name + "</span>\n		</button>\n	</div>\n</div>");
+      feedInfo = "";
+      if (this.radio.isFeedEnabled(buddy)) {
+        feedType = this.radio.getFeedType(buddy);
+        feedInfo = "<div style=\"margin-bottom:10px\">Tuned into <strong>" + feedType + "</strong> radio.<br />";
+        if (feedType === "historic") {
+          feedInfo += "" + (this.radio.getAlreadyFeededCount(buddy)) + " of " + (this.radio.getTotalCountForHistoricFeed(buddy)) + " songs enqueued so far.";
+        } else {
+          feedInfo += "" + (this.radio.getAlreadyFeededCount(buddy)) + " songs enqueued so far.";
+        }
+        feedInfo += "</div>";
+      }
+      $("body").append("<div id=\"buddyradio_more\" style=\"position: absolute; top: " + position.top + "px; left: " + (position.left + 20) + "px; display: block;width: 260px\" class=\"buddyradio_overlay\">\n	" + feedInfo + "\n	<div class=\"buttons\">\n		<img style=\"float:left; padding-right:10px;\" src=\"" + buddy.avatarUrl + "\" />\n		<button type=\"button\" class=\"btn_style1 viewprofile\">\n			<span>View Profile on " + buddy.network.name + "</span>\n		</button>\n	</div>\n</div>");
       $("#buddyradio_more button.viewprofile").click(__bind(function() {
         window.open(buddy.profileUrl);
         $("#buddyradio_more").remove();
         return this._currentlyOpenedMenu = null;
       }, this));
       if (buddy.supportsHistoricFeed()) {
-        $("#buddyradio_more").append("<div style=\"clear:both;padding-top: 10px\">\n	<button type=\"button\" class=\"btn_style1 fetchlastweek\">\n		<span>Listen previously played songs</span>\n	</button>\n	<div class=\"lastweekdata\" style=\"clear:both\"></div>\n</div>");
+        $("#buddyradio_more div.buttons").append("<button style=\"margin-top: 5px\" type=\"button\" class=\"btn_style1 fetchlastweek\">\n	<span>Listen previously played songs</span>\n</button>");
+        $("#buddyradio_more").append("<div class=\"lastweekdata\" style=\"clear:both\"></div>");
         return $("#buddyradio_more button.fetchlastweek").click(__bind(function() {
           var date, day, el, today, todaysDay, _ref;
-          $("#buddyradio_more").css("height", 140);
-          $("#buddyradio_more button.fetchlastweek span").html("Checking last week...");
+          $("#buddyradio_more button.fetchlastweek span").html("Checking last week's songs...");
           el = $("#buddyradio_more .lastweekdata");
           today = new Date();
           todaysDay = today.getDate();
@@ -1814,6 +1914,9 @@ function loadRadio() {
       if ((count != null) && count > 0) {
         return this.radio.setSongsPerFeedInARow(count);
       }
+    };
+    Radio.prototype.setPreloadCount = function(count) {
+      if ((count != null) && count >= 0) return this.radio.setPreloadCount(count);
     };
     return Radio;
   })();

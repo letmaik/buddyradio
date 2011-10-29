@@ -225,15 +225,12 @@ class Model.Radio
 		#      -> not when "nothingPlaying" received, doesn't work if networks only support play()
 		#         because between songs this event will occur!
 		@_feededSongs = {} # map username -> [songs]
+		@_preloadCount = 1
 		@onAirBuddy = null
 		@loadSettings()
 		
 	_settingsStorageKey: "buddyRadio_Settings"
-	
-	# TODO if multiple feeds are played and one historic feed ends, this feed's end isn't visible in UI
-	#      -> add listener to individual non-live-feeds (endOfFeed event) so that they can be forwarded
-	# TODO skipping a song in historic mode would work better with a 1-song-preload
-	
+		
 	# from = to = null -> live
 	tune: (buddy, from = null, to = null) ->
 		historic = from? and to?
@@ -249,12 +246,19 @@ class Model.Radio
 		if buddy.listeningStatus == "disabled"
 			listener("errorTuningIn", {buddy, reason: "disabled"}) for listener in @_eventListeners
 			return
-			
+		
 		feed = 
 			if historic
 				buddy.getHistoricFeed(from, to)
 			else
 				buddy.getLiveFeed()
+		feed.registerListener((name, data) =>
+			if name == "endOfFeed"
+				username = @_getUsernameByFeed(data)
+				# FIXME hacky
+				buddy = @buddyManager.buddies.filter((buddy) -> buddy.username == username)[0]
+				@tuneOut(buddy, "endOfFeed")
+		)
 		@_feedCombinator.addFeed(feed)
 		@_feedEnabledBuddies[buddy.username] = 
 			if historic
@@ -265,7 +269,7 @@ class Model.Radio
 		listener("tunedIn", buddy) for listener in @_eventListeners
 		
 		if not @_currentStream?
-			@_currentStream = new Model.SongFeedStream(@_feedCombinator, @streamingNetworks)
+			@_currentStream = new Model.SongFeedStream(@_feedCombinator, @streamingNetworks, @_preloadCount)
 			@_currentStream.registerListener(@_handleSongFeedStreamEvent)
 			console.debug("starting new stream")
 			result = @_currentStream.startStreaming()
@@ -301,6 +305,14 @@ class Model.Radio
 			throw new Error("feed isn't enabled!!")
 		@_feedEnabledBuddies[buddy.username].type
 		
+	getTotalCountForHistoricFeed: (buddy) ->
+		if @getFeedType(buddy) != "historic"
+			throw new Error("feed isn't historic!")
+		@_feedEnabledBuddies[buddy.username].feed.totalCount
+
+	getAlreadyFeededCount: (buddy) ->
+		@_feedEnabledBuddies[buddy.username].feed.feededCount
+		
 	isOnAir: (buddy) ->
 		buddy == @onAirBuddy
 	
@@ -310,14 +322,28 @@ class Model.Radio
 	setSongsPerFeedInARow: (count) ->
 		@_feedCombinator.songsPerFeedInARow = count
 		@saveSettings()
+	
+	getPreloadCount: () ->
+		@_preloadCount
+	
+	setPreloadCount: (count) ->
+		@_preloadCount = count
+		if @_currentStream?
+			@_currentStream.preloadCount = count
+		@saveSettings()
 		
 	loadSettings: () ->
 		settings = JSON.parse(localStorage[@_settingsStorageKey] or "{}")
 		if settings.hasOwnProperty("songsPerFeedInARow")
 			@setSongsPerFeedInARow(settings.songsPerFeedInARow)
+		if settings.hasOwnProperty("preloadCount")
+			@_preloadCount = settings.preloadCount
 	
 	saveSettings: () ->
-		settings = {songsPerFeedInARow: @getSongsPerFeedInARow()}
+		settings = {
+			songsPerFeedInARow: @getSongsPerFeedInARow(),
+			preloadCount: @_preloadCount
+		}
 		localStorage[@_settingsStorageKey] = JSON.stringify(settings)
 	
 	_handleBuddyManagerEvent: (name, data) =>
@@ -368,14 +394,20 @@ class Model.SongResource
 		
 	getPlayingPosition: () -> throw E # position in ms | null if unknown
 class Model.SongFeed
+	constructor: () ->
+		@_eventListeners = []
 	hasOpenEnd: () -> throw EOVR
-	hasNext: () -> throw EOVR		
+	hasNext: () -> throw EOVR
 	next: () -> throw EOVR
+	registerListener: (listener) ->
+		@_eventListeners.push(listener)
 	
 class Model.SequentialSongFeedCombinator extends Model.SongFeed
 	constructor: (@feeds...) ->
+		super()
 		if @feeds.length == 0
 			throw new Error("no feeds given!")
+		@feededCount = 0
 		@_currentFeedIdx = 0
 		
 	hasOpenEnd: () ->
@@ -390,19 +422,18 @@ class Model.SequentialSongFeedCombinator extends Model.SongFeed
 			hasNext
 		
 	next: () ->
+		@feededCount++
 		@feeds[@_currentFeedIdx].next()
-		
+				
 	addFeed: (feed) ->
 		@feeds.push(feed)
 		
 class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 	constructor: (@songsPerFeedInARow = 1, @feeds...) ->
+		super()
+		@feededCount = 0
 		@_currentFeedIdx = 0
 		@_currentFeedSongsInARow = 0
-		@_eventListeners = []
-		
-	registerListener: (listener) ->
-		@_eventListeners.push(listener)
 		
 	hasOpenEnd: () ->
 		@feeds.some((feed) -> feed.hasOpenEnd())
@@ -433,6 +464,7 @@ class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 	next: () ->
 		@_currentFeedSongsInARow++
 		song = @feeds[@_currentFeedIdx].next()
+		@feededCount++
 		listener("nextSongReturned", {feed: @feeds[@_currentFeedIdx], song}) for listener in @_eventListeners
 		song
 		
@@ -448,7 +480,8 @@ class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 		console.debug("feed removed")
 		@_currentFeedSongsInARow = 0
 class Model.SongFeedStream
-	constructor: (@songFeed, @streamingNetworks) ->
+	# preloadCount: if feed doesn't have an open end (=isn't live) then x songs will be preloaded/queued
+	constructor: (@songFeed, @streamingNetworks, @preloadCount = 1) ->
 		network.registerListener(@_handleStreamingNetworkEvent) for network in @streamingNetworks
 		@stopRequest = false
 		@queue = [] # array of {song, resource}
@@ -492,8 +525,12 @@ class Model.SongFeedStream
 						if network.enqueue and lastSongStreamedNetwork == network and @queue.length > 0
 							@queue.push({song, resource: preferredResource})
 							network.enqueue(preferredResource)
-							console.log("waiting")
-							@_waitUntilEndOfQueue(0.9)
+							if @songFeed.hasOpenEnd() or @preloadCount == 0
+								console.log("waiting")
+								@_waitUntilEndOfQueue(0.9)
+							else
+								console.log("waiting until queue gets smaller (then: preload new song)")
+								@_waitUntilQueueLessThanOrEqual(@preloadCount)
 						else
 							console.log("waiting 2")
 							@_waitUntilEndOfQueue(1.0)
@@ -501,26 +538,24 @@ class Model.SongFeedStream
 							listener("songPlaying", song) for listener in @_eventListeners
 							network.play(preferredResource)
 							lastSongStreamedNetwork = network
-							console.log("waiting 3")
-							@_waitUntilEndOfQueue(0.9)
+							if not network.enqueue or @songFeed.hasOpenEnd() or @preloadCount == 0
+								console.log("waiting 3")
+								@_waitUntilEndOfQueue(0.9)
 					else
+						# TODO noSongFound event
 						continue # with next song in feed without waiting
 		else
 			waitfor rv
 				@_stopRequestCall = resume
 			return { status: "stopRequest" }
-			
-			
-	dispose: () ->
-		if not @stopRequest
-			throw new Error("can only dispose after streaming was stopped")
-		network.removeListener(@_handleStreamingNetworkEvent) for network in @streamingNetworks
-		@_eventListeners = []
-			
-	_waitUntilEndOfQueue: (factor) ->
-		while @queue.length > 1
-			console.debug("holding on... #{@queue.length} songs in queue")
+	
+	_waitUntilQueueLessThanOrEqual: (count) ->
+		while @queue.length > count
+			console.debug("holding on... #{@queue.length} songs in queue (target: #{count})")
 			hold(5000)
+	
+	_waitUntilEndOfQueue: (factor) ->
+		@_waitUntilQueueLessThanOrEqual(1)
 		if @queue.length == 0
 			return
 		
@@ -565,11 +600,7 @@ class Model.SongFeedStream
 				resources[0]
 			else
 				matchingResource[0]
-		
-	# TODO
-#	isAlternativeSong: false
-#	noSongFound: false
-				
+					
 	_handleStreamingNetworkEvent: (name, data) =>
 		if ["streamingSkipped", "streamingCompleted", "streamingFailed"].indexOf(name) != -1 and @queue[0].resource == data	
 			if name == "streamingSkipped"
@@ -583,6 +614,12 @@ class Model.SongFeedStream
 				listener("songPlaying", @queue[0].song) for listener in @_eventListeners
 			else
 				listener("nothingPlaying") for listener in @_eventListeners
+				
+	dispose: () ->
+		if not @stopRequest
+			throw new Error("can only dispose after streaming was stopped")
+		network.removeListener(@_handleStreamingNetworkEvent) for network in @streamingNetworks
+		@_eventListeners = []
 class Model.StreamingNetwork
 	constructor: () ->
 		@eventListeners = []
@@ -679,6 +716,8 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		Grooveshark.addSongsByID([songResource.songId])		
 		
 	getPlayingPosition: (songResource) ->
+		# TODO cleanup() needs to be called in background continuously, otherwise it could get stuck if preloadCount>0
+		#      -> not possible ATM because of missing spawn support
 		@cleanup()
 		gsSong = Grooveshark.getCurrentSongStatus().song
 		if gsSong? and gsSong.songID == songResource.songId
@@ -854,7 +893,6 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 			throw new Error("wrong parameters")
 		new Model.LastFmHistoricSongFeed(username, @, from, to)
 	
-	# TODO cache data
 	hasHistoricData: (username, date) ->
 		try
 			from = Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0) / 1000)
@@ -964,18 +1002,25 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 
 class Model.LastFmSongFeed extends Model.SongFeed
 	constructor: () ->
+		super()
+		@feededCount = 0
 		@_songs = []
 		@_songsQueuedLength = 0
-		@_currentSongsIdx = -1		
+		@_currentSongsIdx = -1
+		@_endOfFeedEventSent = false
 	
 	hasNext: () ->
 		if @_songsQueuedLength == 0
 			@_updateFeed()
+		if @_songsQueuedLength == 0 and not @hasOpenEnd() and not @_endOfFeedEventSent
+			listener("endOfFeed", @) for listener in @_eventListeners
+			@_endOfFeedEventSent = true
 		@_songsQueuedLength > 0
 		
 	next: () ->
 		if @_songsQueuedLength == 0
 			throw new Error("no more songs available!")
+		@feededCount++
 		@_currentSongsIdx++
 		@_songsQueuedLength--
 		console.debug("feed queue: #{@_songs[@_currentSongsIdx...@_songs.length]}")
@@ -1080,7 +1125,8 @@ class Model.LastFmHistoricSongFeed extends Model.LastFmSongFeed
 		response = @_getPage(1)
 		if not response?
 			throw new Error("listening history disabled")
-		@page = response["@attr"].totalPages		
+		@page = response["@attr"].totalPages	
+		@totalCount = response["@attr"].total
 
 	hasOpenEnd: () -> false
 		
@@ -1125,6 +1171,22 @@ class View.BuddySidebarSection
 		@radio.registerListener(@handleRadioEvent)
 		@radio.buddyManager.registerListener(@handleBuddyManagerEvent)
 		@init()
+		
+		# don't know of any better method
+		@_cprInProgress = false
+		@_lifesLeft = 9
+		$(document).bind("DOMNodeRemoved", (e) =>
+			# can't check for e.target.id, because 'sidebar_buddyradio_wrapper' never appears
+			if $("#sidebar_buddyradio_wrapper").length == 0 and not @_cprInProgress and @_lifesLeft > 0
+				@_cprInProgress = true
+				console.warn("OMG! We were killed!")
+				hold(1000)
+				@_lifesLeft--
+				console.warn("Phew... #{@_lifesLeft} lifes left")
+				@init()
+				@refresh()
+				@_cprInProgress = false
+		)
 		
 	handleRadioEvent: (name, data) =>
 		if name == "tunedIn"
@@ -1248,7 +1310,7 @@ class View.BuddySidebarSection
 		<div id="sidebar_buddyradio_wrapper" class="listWrapper">
             <div class="divider" style="display: block;">
                 <span class="sidebarHeading">Buddy Radio
-					<a id="buddyradio_settingsLink">&gt; Settings</a>
+					<a id="buddyradio_settingsLink">Settings</a>
 				</span>
                 <a class="sidebarNew"><span>Add Buddy</span></a>
             </div>
@@ -1323,21 +1385,27 @@ class View.BuddySidebarSection
 				return
 				
 			position = newButton.offset()
-			songsPerFeedInARow = @radio.getSongsPerFeedInARow()
+			
 			songsPerFeedInARowValues = [1,2,3,4,5,10,15,20,30,40,50,100]
-			options = songsPerFeedInARowValues.map((n) ->
-				sel = if songsPerFeedInARow == n then " selected" else ""
-				"<option value=\"#{n}\"#{sel}>#{n}</option>"
-			).join()
+			optionsSongsPerFeed = @_constructOptions(songsPerFeedInARowValues, @radio.getSongsPerFeedInARow())
+			
+			optionsPreload = @_constructOptions([0..5], @radio.getPreloadCount())
 			
 			$("body").append("""
-			<div id="buddyradio_settingsform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 300px; height:60px" class="buddyradio_overlay">
+			<div id="buddyradio_settingsform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 310px" class="buddyradio_overlay">
 				<div>
 					Play 
 					<select name="songsPerFeedInARow">
-						#{options}
+						#{optionsSongsPerFeed}
 					</select>
 					song/s in a row from same buddy
+				</div>
+				<div style="margin-top: 5px">
+					Preload
+					<select name="preloadCount">
+						#{optionsPreload}
+					</select>
+					song/s when playing historic radio
 				</div>
 				<div style="padding-top:10px">
 					<button type="button" class="btn_style1">
@@ -1347,11 +1415,20 @@ class View.BuddySidebarSection
 			</div>
 			""")
 			$("#buddyradio_settingsform button").click(() =>
-				count = $("#buddyradio_settingsform select[name=songsPerFeedInARow]")[0].value
-				@controller.setSongsPerFeedInARow(parseInt(count))
+				songsPerFeed = $("#buddyradio_settingsform select[name=songsPerFeedInARow]")[0].value
+				preloadCount = $("#buddyradio_settingsform select[name=preloadCount]")[0].value		
+				@controller.setSongsPerFeedInARow(parseInt(songsPerFeed))
+				@controller.setPreloadCount(parseInt(preloadCount))
 				$("#buddyradio_settingsform").remove()
 			)
 		)
+	
+	_constructOptions: (options, selected = null) ->
+		options.map((n) ->
+			sel = if selected == n then " selected" else ""
+			"<option value=\"#{n}\"#{sel}>#{n}</option>"
+		).join()
+		
 	refresh: () ->
 		console.debug("refreshing view")
 		$("#sidebar_buddyradio").empty()
@@ -1420,10 +1497,24 @@ class View.BuddySidebarSection
 		@_currentlyOpenedMenu = buddy
 		position = $("li.sidebar_buddy[rel='#{networkClassName}-#{username}'] .more").offset()
 		if not position?
-			return		
+			return
+		
+		feedInfo = ""
+		if @radio.isFeedEnabled(buddy)
+			feedType = @radio.getFeedType(buddy)
+			feedInfo = """
+				<div style="margin-bottom:10px">Tuned into <strong>#{feedType}</strong> radio.<br />
+			"""
+			if feedType == "historic"
+				feedInfo += "#{@radio.getAlreadyFeededCount(buddy)} of #{@radio.getTotalCountForHistoricFeed(buddy)} songs enqueued so far."
+			else
+				feedInfo += "#{@radio.getAlreadyFeededCount(buddy)} songs enqueued so far."
+			feedInfo += "</div>"
+				
 		$("body").append("""
-		<div id="buddyradio_more" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 260px; height:80px" class="buddyradio_overlay">
-			<div>
+		<div id="buddyradio_more" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 260px" class="buddyradio_overlay">
+			#{feedInfo}
+			<div class="buttons">
 				<img style="float:left; padding-right:10px;" src="#{buddy.avatarUrl}" />
 				<button type="button" class="btn_style1 viewprofile">
 					<span>View Profile on #{buddy.network.name}</span>
@@ -1439,17 +1530,16 @@ class View.BuddySidebarSection
 		)
 		
 		if buddy.supportsHistoricFeed()
-			$("#buddyradio_more").append("""
-			<div style="clear:both;padding-top: 10px">
-				<button type="button" class="btn_style1 fetchlastweek">
+			$("#buddyradio_more div.buttons").append("""
+				<button style="margin-top: 5px" type="button" class="btn_style1 fetchlastweek">
 					<span>Listen previously played songs</span>
 				</button>
+			""")
+			$("#buddyradio_more").append("""
 				<div class="lastweekdata" style="clear:both"></div>
-			</div>
 			""")
 			$("#buddyradio_more button.fetchlastweek").click(() =>
-				$("#buddyradio_more").css("height", 140)
-				$("#buddyradio_more button.fetchlastweek span").html("Checking last week...")
+				$("#buddyradio_more button.fetchlastweek span").html("Checking last week's songs...")
 				# check last 7 days for song data
 				el = $("#buddyradio_more .lastweekdata")
 				today = new Date()
@@ -1508,6 +1598,10 @@ class Controller.Radio
 	setSongsPerFeedInARow: (count) ->
 		if count? and count > 0
 			@radio.setSongsPerFeedInARow(count)
+	
+	setPreloadCount: (count) ->
+		if count? and count >= 0
+			@radio.setPreloadCount(count)
 	]]></>).toString();
 	
 	unsafeWindow.CScript = module.CoffeeScript;

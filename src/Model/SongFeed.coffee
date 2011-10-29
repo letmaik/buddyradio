@@ -2,7 +2,7 @@ class Model.SongFeed
 	constructor: () ->
 		@_eventListeners = []
 	hasOpenEnd: () -> throw EOVR
-	hasNext: () -> throw EOVR		
+	hasNext: () -> throw EOVR
 	next: () -> throw EOVR
 	registerListener: (listener) ->
 		@_eventListeners.push(listener)
@@ -12,6 +12,7 @@ class Model.SequentialSongFeedCombinator extends Model.SongFeed
 		super()
 		if @feeds.length == 0
 			throw new Error("no feeds given!")
+		@feededCount = 0
 		@_currentFeedIdx = 0
 		
 	hasOpenEnd: () ->
@@ -26,14 +27,16 @@ class Model.SequentialSongFeedCombinator extends Model.SongFeed
 			hasNext
 		
 	next: () ->
+		@feededCount++
 		@feeds[@_currentFeedIdx].next()
-		
+				
 	addFeed: (feed) ->
 		@feeds.push(feed)
 		
 class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 	constructor: (@songsPerFeedInARow = 1, @feeds...) ->
 		super()
+		@feededCount = 0
 		@_currentFeedIdx = 0
 		@_currentFeedSongsInARow = 0
 		
@@ -66,6 +69,7 @@ class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 	next: () ->
 		@_currentFeedSongsInARow++
 		song = @feeds[@_currentFeedIdx].next()
+		@feededCount++
 		listener("nextSongReturned", {feed: @feeds[@_currentFeedIdx], song}) for listener in @_eventListeners
 		song
 		
