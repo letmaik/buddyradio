@@ -1,3 +1,7 @@
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 View = {}
 
 class View.BuddySidebarSection
@@ -382,6 +386,9 @@ class View.BuddySidebarSection
 				(
 					date = new Date(today.getFullYear(), today.getMonth(), day)
 					if buddy.hasHistoricData(date)
+						
+						# TODO read out song count of that day and display it here: "Listen 123 songs from.."
+						
 						el.append("""
 						<a rel="#{date.getTime()}">Listen songs from #{date.toDateString()}</a><br />
 						""")

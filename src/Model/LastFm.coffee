@@ -1,14 +1,27 @@
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	name: "Last.fm"
 	className: "Model.LastFmBuddyNetwork"
 	
+# TODO
 #	constructor: () ->
-#   spawn not yet supported
-#		spawn
-#			loop
-#				for own username, listeners of @_eventListeners
-#					@_updateListeningData(username)
-#				hold(60000)
+#		spawn @_periodicUpdate()
+			
+	_periodicUpdate: () ->
+		loop
+			console.log("loop")
+			for own username, listeners of @_eventListeners
+				console.log("test #{username}")
+				console.log(@)
+				@_updateListeningData(username)
+				console.log("test2 #{username}")
+			console.log("before hold")
+			hold(30000)
+			console.log("after hold")
+		null
 
 	# terms of service: "You will not make more than 5 requests per originating IP address per second, averaged over a 5 minute period"
 	# -> this is equal to max 5*60*5=1500 requests per 5 minutes

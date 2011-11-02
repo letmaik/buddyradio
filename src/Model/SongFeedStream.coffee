@@ -1,3 +1,7 @@
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 class Model.SongFeedStream
 	# preloadCount: if feed doesn't have an open end (=isn't live) then x songs will be preloaded/queued
 	constructor: (@songFeed, @streamingNetworks, @preloadCount = 1) ->

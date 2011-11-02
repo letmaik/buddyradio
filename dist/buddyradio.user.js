@@ -1,10 +1,17 @@
 // ==UserScript==
 // @name          BuddyRadio
 // @namespace     http://github.com/neothemachine/
-// @version       0.1
-// @description   tbd
+// @version       0.3
+// @description   Extends Grooveshark and lets you see and hear what your Last.fm friends listen to.
+// @author        Maik Riechert
 // @include       http://grooveshark.com/*
 // ==/UserScript==
+
+/*
+Copyright (c) 2011 Maik Riechert
+Licensed under the GNU General Public License v3
+License available at http://www.gnu.org/licenses/gpl-3.0.html
+*/
 
 if (window.top != window.self)  // don't run on iframes
     return;

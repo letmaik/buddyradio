@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          BuddyRadio
 // @namespace     http://github.com/neothemachine/
-// @version       0.2
+// @version       0.3
 // @description   tbd
 // @include       http://grooveshark.com/*
 // ==/UserScript==
@@ -468,9 +468,10 @@ function loadRadio() {
     Radio.prototype.getSongsPerFeedInARow = function() {
       return this._feedCombinator.songsPerFeedInARow;
     };
-    Radio.prototype.setSongsPerFeedInARow = function(count) {
+    Radio.prototype.setSongsPerFeedInARow = function(count, dontSave) {
+      if (dontSave == null) dontSave = false;
       this._feedCombinator.songsPerFeedInARow = count;
-      return this.saveSettings();
+      if (!dontSave) return this.saveSettings();
     };
     Radio.prototype.getPreloadCount = function() {
       return this._preloadCount;
@@ -484,7 +485,7 @@ function loadRadio() {
       var settings;
       settings = JSON.parse(localStorage[this._settingsStorageKey] || "{}");
       if (settings.hasOwnProperty("songsPerFeedInARow")) {
-        this.setSongsPerFeedInARow(settings.songsPerFeedInARow);
+        this.setSongsPerFeedInARow(settings.songsPerFeedInARow, true);
       }
       if (settings.hasOwnProperty("preloadCount")) {
         return this._preloadCount = settings.preloadCount;
@@ -1194,6 +1195,25 @@ function loadRadio() {
     }
     LastFmBuddyNetwork.prototype.name = "Last.fm";
     LastFmBuddyNetwork.prototype.className = "Model.LastFmBuddyNetwork";
+    LastFmBuddyNetwork.prototype._periodicUpdate = function() {
+      var listeners, username, _ref;
+      while (true) {
+        console.log("loop");
+        _ref = this._eventListeners;
+        for (username in _ref) {
+          if (!__hasProp.call(_ref, username)) continue;
+          listeners = _ref[username];
+          console.log("test " + username);
+          console.log(this);
+          this._updateListeningData(username);
+          console.log("test2 " + username);
+        }
+        console.log("before hold");
+        hold(30000);
+        console.log("after hold");
+      }
+      return null;
+    };
     LastFmBuddyNetwork.prototype._rateLimiter = new Model.APIRateLimiter(500, 300);
     LastFmBuddyNetwork.prototype._buddyCache = {};
     LastFmBuddyNetwork.prototype._buddyListeningCache = {};

@@ -1,3 +1,7 @@
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 # TODO all internal maps of type username -> .. will fail if more buddy networks are supported and
 #      a user with same username is added in two networks
 #      solution: use real maps (http://stackoverflow.com/questions/368280/javascript-hashmap-equivalent/383540#383540)
@@ -114,9 +118,10 @@ class Model.Radio
 	getSongsPerFeedInARow: () ->
 		@_feedCombinator.songsPerFeedInARow
 	
-	setSongsPerFeedInARow: (count) ->
+	setSongsPerFeedInARow: (count, dontSave = false) ->
 		@_feedCombinator.songsPerFeedInARow = count
-		@saveSettings()
+		if not dontSave
+			@saveSettings()
 	
 	getPreloadCount: () ->
 		@_preloadCount
@@ -130,7 +135,7 @@ class Model.Radio
 	loadSettings: () ->
 		settings = JSON.parse(localStorage[@_settingsStorageKey] or "{}")
 		if settings.hasOwnProperty("songsPerFeedInARow")
-			@setSongsPerFeedInARow(settings.songsPerFeedInARow)
+			@setSongsPerFeedInARow(settings.songsPerFeedInARow, true)
 		if settings.hasOwnProperty("preloadCount")
 			@_preloadCount = settings.preloadCount
 	

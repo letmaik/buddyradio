@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          BuddyRadio
 // @namespace     http://github.com/neothemachine/
-// @version       0.2
+// @version       0.3
 // @description   tbd
 // @include       http://grooveshark.com/*
 // ==/UserScript==

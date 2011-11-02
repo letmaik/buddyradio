@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          BuddyRadio
 // @namespace     http://github.com/neothemachine/
-// @version       0.2
+// @version       0.3
 // @description   tbd
 // @include       http://grooveshark.com/*
 // ==/UserScript==
@@ -30,6 +30,10 @@ function coffeeLoaded(err, module) {
 	if (err) throw ('error: ' + err);
 	
 	var debugMultiLineHack = (<><![CDATA[
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 exports.start = () ->
 	controller = new Controller.Radio([new Model.LastFmBuddyNetwork], [new Model.GroovesharkStreamingNetwork])
 	new View.BuddySidebarSection(controller)
@@ -39,11 +43,19 @@ exports.classes = () ->
 	{ Model, View, Controller }
 
 http = require("apollo:http")
-LastFmApi = require("apollo:lastfm");
+LastFmApi = require("apollo:lastfm")
 LastFmApi.key = "53cda3b9d8760dbded7b4ca420b5abb2"
 
 EOVR = new Error("must be overriden")
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 Model = {}
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 # see http://stackoverflow.com/questions/667508/whats-a-good-rate-limiting-algorithm
 
 class Model.APIRateLimiter
@@ -70,6 +82,10 @@ class Model.APIRateLimiter
 		timePassed = current - @_lastCount
 		newAllowance = @_allowance + timePassed * (@rate / @per)
 		newAllowance >= 1
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 class Model.Buddy
 	constructor: (@network, @username) ->
 		info = @network.getInfo(@username)
@@ -120,6 +136,10 @@ class Model.Buddy
 		
 	toString: () ->
 		"Buddy[#{@network.name}:#{@username}]"
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 class Model.BuddyManager
 	constructor: (@buddyNetworks) ->
 	buddies: []
@@ -188,6 +208,10 @@ class Model.BuddyManager
 			
 	_findBuddyNetwork: (networkClassName) ->
 		@buddyNetworks.filter((network) -> network.className == networkClassName)[0]
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 # only a buddy gets a network and uses it (no one else calls it's methods!)
 # exception: getBuddies() is called from BuddyManager to import existing buddies/friends
 class Model.BuddyNetwork
@@ -203,6 +227,10 @@ class Model.BuddyNetwork
 	getBuddies: (buddyId) -> throw EOVR # returns array of buddyId's
 	registerListener: (listener, buddyId) -> throw EOVR
 	removeListener: (listener, buddyId) -> throw EOVR
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 # TODO all internal maps of type username -> .. will fail if more buddy networks are supported and
 #      a user with same username is added in two networks
 #      solution: use real maps (http://stackoverflow.com/questions/368280/javascript-hashmap-equivalent/383540#383540)
@@ -319,9 +347,10 @@ class Model.Radio
 	getSongsPerFeedInARow: () ->
 		@_feedCombinator.songsPerFeedInARow
 	
-	setSongsPerFeedInARow: (count) ->
+	setSongsPerFeedInARow: (count, dontSave = false) ->
 		@_feedCombinator.songsPerFeedInARow = count
-		@saveSettings()
+		if not dontSave
+			@saveSettings()
 	
 	getPreloadCount: () ->
 		@_preloadCount
@@ -335,7 +364,7 @@ class Model.Radio
 	loadSettings: () ->
 		settings = JSON.parse(localStorage[@_settingsStorageKey] or "{}")
 		if settings.hasOwnProperty("songsPerFeedInARow")
-			@setSongsPerFeedInARow(settings.songsPerFeedInARow)
+			@setSongsPerFeedInARow(settings.songsPerFeedInARow, true)
 		if settings.hasOwnProperty("preloadCount")
 			@_preloadCount = settings.preloadCount
 	
@@ -380,6 +409,10 @@ class Model.Radio
 			@onAirBuddy = null
 			listener("nobodyPlaying", {lastPlayingBuddy: oldOnAirBuddy}) for listener in @_eventListeners
 			console.debug("nobody's playing anything")
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 class Model.Song
 	constructor: (@artist, @title, @album = null, @listenedAt) -> # unix timestamp in s | null if current song
 		if not @listenedAt?
@@ -393,6 +426,10 @@ class Model.SongResource
 		@length = null # song length in ms | null if unknown (yet)
 		
 	getPlayingPosition: () -> throw E # position in ms | null if unknown
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 class Model.SongFeed
 	constructor: () ->
 		@_eventListeners = []
@@ -479,6 +516,10 @@ class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 		@_currentFeedIdx = 0
 		console.debug("feed removed")
 		@_currentFeedSongsInARow = 0
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 class Model.SongFeedStream
 	# preloadCount: if feed doesn't have an open end (=isn't live) then x songs will be preloaded/queued
 	constructor: (@songFeed, @streamingNetworks, @preloadCount = 1) ->
@@ -620,6 +661,10 @@ class Model.SongFeedStream
 			throw new Error("can only dispose after streaming was stopped")
 		network.removeListener(@_handleStreamingNetworkEvent) for network in @streamingNetworks
 		@_eventListeners = []
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 class Model.StreamingNetwork
 	constructor: () ->
 		@eventListeners = []
@@ -635,6 +680,10 @@ class Model.StreamingNetwork
 	play: (songResource) -> throw new Error("must be overriden")
 	stop: () -> throw new Error("must be overriden")
 	# declare "enqueue: (songResource) ->" in subclass if network supports enqueueing
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 class Model.GroovesharkSongResource extends Model.SongResource
 	constructor: (@songId, @groovesharkNetwork) ->
 		super()
@@ -810,17 +859,30 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 				@lastFailedSongResource = resource
 				@play(resource, true)
 		
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	name: "Last.fm"
 	className: "Model.LastFmBuddyNetwork"
 	
+# TODO
 #	constructor: () ->
-#   spawn not yet supported
-#		spawn
-#			loop
-#				for own username, listeners of @_eventListeners
-#					@_updateListeningData(username)
-#				hold(60000)
+#		spawn @_periodicUpdate()
+			
+	_periodicUpdate: () ->
+		loop
+			console.log("loop")
+			for own username, listeners of @_eventListeners
+				console.log("test #{username}")
+				console.log(@)
+				@_updateListeningData(username)
+				console.log("test2 #{username}")
+			console.log("before hold")
+			hold(30000)
+			console.log("after hold")
+		null
 
 	# terms of service: "You will not make more than 5 requests per originating IP address per second, averaged over a 5 minute period"
 	# -> this is equal to max 5*60*5=1500 requests per 5 minutes
@@ -1163,6 +1225,10 @@ class Model.LastFmHistoricSongFeed extends Model.LastFmSongFeed
 				null
 			else
 				throw e
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 View = {}
 
 class View.BuddySidebarSection
@@ -1547,6 +1613,9 @@ class View.BuddySidebarSection
 				(
 					date = new Date(today.getFullYear(), today.getMonth(), day)
 					if buddy.hasHistoricData(date)
+						
+						# TODO read out song count of that day and display it here: "Listen 123 songs from.."
+						
 						el.append("""
 						<a rel="#{date.getTime()}">Listen songs from #{date.toDateString()}</a><br />
 						""")
@@ -1562,6 +1631,10 @@ class View.BuddySidebarSection
 					@controller.tuneHistoric(networkClassName, username, from, to)					
 				)
 			)
+# Copyright (c) 2011 Maik Riechert
+# Licensed under the GNU General Public License v3
+# License available at http://www.gnu.org/licenses/gpl-3.0.html
+
 Controller = {}
 
 class Controller.Radio
