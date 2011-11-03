@@ -25,6 +25,8 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		if not (Grooveshark.addSongsByID? and Grooveshark.setSongStatusCallback? and Grooveshark.pause? and Grooveshark.removeCurrentSongFromQueue?)
 			throw new Error("Grooveshark API has changed")
 		Grooveshark.setSongStatusCallback(@handleGroovesharkEvent)
+		
+		spawn @_doPeriodicCleanup()
 
 	findSongResource: (artist, title, album = null) ->
 		albumParam = if album? then "&album=#{album}" else ""			
@@ -83,9 +85,6 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		Grooveshark.addSongsByID([songResource.songId])		
 		
 	getPlayingPosition: (songResource) ->
-		# TODO cleanup() needs to be called in background continuously, otherwise it could get stuck if preloadCount>0
-		#      -> not possible ATM because of missing spawn support
-		@cleanup()
 		gsSong = Grooveshark.getCurrentSongStatus().song
 		if gsSong? and gsSong.songID == songResource.songId
 			
@@ -100,8 +99,13 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			gsSong.position
 		else
 			null
-		
-	cleanup: () ->
+
+	_doPeriodicCleanup: () ->
+		loop
+			@_cleanup()
+			hold(5000)
+			
+	_cleanup: () ->
 		# sometimes grooveshark doesn't add and play a song when calling addSongsByID()
 		# this leaves our queue in an inconsistent state so we have to clean it up now and then
 		if @queuedSongResources.length > 0 and

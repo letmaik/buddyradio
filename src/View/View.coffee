@@ -251,6 +251,10 @@ class View.BuddySidebarSection
 						<span>Apply</span>
 					</button>					
 				</div>
+				<div style="margin-top:10px; float:right; text-align:right">
+					BuddyRadio v0.3<br />
+					<a href="http://neothemachine.github.com/buddyradio" target="_blank">Project Page</a>
+				</div>
 			</div>
 			""")
 			$("#buddyradio_settingsform button").click(() =>

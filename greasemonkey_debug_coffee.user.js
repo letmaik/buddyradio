@@ -1,36 +1,33 @@
 // ==UserScript==
-// @name          BuddyRadio
+// @name          BuddyRadio Debug
 // @namespace     http://github.com/neothemachine/
-// @version       0.3
-// @description   tbd
 // @include       http://grooveshark.com/*
 // ==/UserScript==
 
-if (window.top != window.self)  // don't run on iframes
-    return;
-	
-// TODO only execute if Grooveshark object available (takes some time!)
-// (or prevent it from running on http://grooveshark.com/upload etc.)
+(function ()
+{
+	if (window.top != window.self)  // don't run on iframes
+		return;
+		
+	var s = document.createElement("script");
+	s.type = "text/javascript";
+	s.src = "http://code.onilabs.com/apollo/0.13/oni-apollo.js";
+	s.addEventListener("load", loadCoffeeOnDelay, false);
+	document.body.appendChild(s);
 
-var s = document.createElement("script");
-s.type = "text/javascript";
-s.src = "http://code.onilabs.com/apollo/0.13/oni-apollo.js";
-s.addEventListener("load", loadCoffeeOnDelay, false);
-document.body.appendChild(s);
+	function loadCoffeeOnDelay() {
+		setTimeout(loadCoffee, 666);
+	}
 
-function loadCoffeeOnDelay() {
-	setTimeout(loadCoffee, 666);
-}
+	function loadCoffee() {
+		unsafeWindow.require("github:onilabs/coffee-script/master/extras/coffee-script.js", {callback: coffeeLoaded});
+	}
 
-function loadCoffee() {
-	unsafeWindow.require("github:onilabs/coffee-script/master/extras/coffee-script.js", {callback: coffeeLoaded});
-}
-
-function coffeeLoaded(err, module) {
-	if (err) throw ('error: ' + err);
-	
-	var debugMultiLineHack = (<><![CDATA[
-# Copyright (c) 2011 Maik Riechert
+	function coffeeLoaded(err, module) {
+		if (err) throw ('error: ' + err);
+		
+		var debugMultiLineHack = (<><![CDATA[
+	# Copyright (c) 2011 Maik Riechert
 # Licensed under the GNU General Public License v3
 # License available at http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -707,6 +704,8 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		if not (Grooveshark.addSongsByID? and Grooveshark.setSongStatusCallback? and Grooveshark.pause? and Grooveshark.removeCurrentSongFromQueue?)
 			throw new Error("Grooveshark API has changed")
 		Grooveshark.setSongStatusCallback(@handleGroovesharkEvent)
+		
+		spawn @_doPeriodicCleanup()
 
 	findSongResource: (artist, title, album = null) ->
 		albumParam = if album? then "&album=#{album}" else ""			
@@ -765,9 +764,6 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		Grooveshark.addSongsByID([songResource.songId])		
 		
 	getPlayingPosition: (songResource) ->
-		# TODO cleanup() needs to be called in background continuously, otherwise it could get stuck if preloadCount>0
-		#      -> not possible ATM because of missing spawn support
-		@cleanup()
 		gsSong = Grooveshark.getCurrentSongStatus().song
 		if gsSong? and gsSong.songID == songResource.songId
 			
@@ -782,8 +778,13 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 			gsSong.position
 		else
 			null
-		
-	cleanup: () ->
+
+	_doPeriodicCleanup: () ->
+		loop
+			@_cleanup()
+			hold(5000)
+			
+	_cleanup: () ->
 		# sometimes grooveshark doesn't add and play a song when calling addSongsByID()
 		# this leaves our queue in an inconsistent state so we have to clean it up now and then
 		if @queuedSongResources.length > 0 and
@@ -867,21 +868,13 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	name: "Last.fm"
 	className: "Model.LastFmBuddyNetwork"
 	
-# TODO
-#	constructor: () ->
-#		spawn @_periodicUpdate()
+	constructor: () ->
+		spawn @_periodicUpdate()
 			
 	_periodicUpdate: () ->
 		loop
-			console.log("loop")
-			for own username, listeners of @_eventListeners
-				console.log("test #{username}")
-				console.log(@)
-				@_updateListeningData(username)
-				console.log("test2 #{username}")
-			console.log("before hold")
-			hold(30000)
-			console.log("after hold")
+			@_updateListeningData(username) for username in Object.keys(@_eventListeners)
+			hold(60000)
 		null
 
 	# terms of service: "You will not make more than 5 requests per originating IP address per second, averaged over a 5 minute period"
@@ -1478,6 +1471,10 @@ class View.BuddySidebarSection
 						<span>Apply</span>
 					</button>					
 				</div>
+				<div style="margin-top:10px; float:right; text-align:right">
+					BuddyRadio v0.3<br />
+					<a href="http://neothemachine.github.com/buddyradio" target="_blank">Project Page</a>
+				</div>
 			</div>
 			""")
 			$("#buddyradio_settingsform button").click(() =>
@@ -1675,16 +1672,17 @@ class Controller.Radio
 	setPreloadCount: (count) ->
 		if count? and count >= 0
 			@radio.setPreloadCount(count)
-	]]></>).toString();
-	
-	unsafeWindow.CScript = module.CoffeeScript;
-	unsafeWindow.CS = debugMultiLineHack;
-	var sjsSrc = module.CoffeeScript.compile(debugMultiLineHack);
-	unsafeWindow.SJS = sjsSrc;
-	unsafeWindow.require("local:buddyradio", {callback: radioLoaded, src: sjsSrc});
-}
+		]]></>).toString();
+		
+		unsafeWindow.CScript = module.CoffeeScript;
+		unsafeWindow.CS = debugMultiLineHack;
+		var sjsSrc = module.CoffeeScript.compile(debugMultiLineHack);
+		unsafeWindow.SJS = sjsSrc;
+		unsafeWindow.require("local:buddyradio", {callback: radioLoaded, src: sjsSrc});
+	}
 
-function radioLoaded(err, module) {
-	if (err) alert(err); //throw new Error('error: ' + err);
-	module.start();
-}
+	function radioLoaded(err, module) {
+		if (err) alert(err); //throw new Error('error: ' + err);
+		module.start();
+	}
+})();

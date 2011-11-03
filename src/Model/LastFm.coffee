@@ -6,21 +6,13 @@ class Model.LastFmBuddyNetwork extends Model.BuddyNetwork
 	name: "Last.fm"
 	className: "Model.LastFmBuddyNetwork"
 	
-# TODO
-#	constructor: () ->
-#		spawn @_periodicUpdate()
+	constructor: () ->
+		spawn @_periodicUpdate()
 			
 	_periodicUpdate: () ->
 		loop
-			console.log("loop")
-			for own username, listeners of @_eventListeners
-				console.log("test #{username}")
-				console.log(@)
-				@_updateListeningData(username)
-				console.log("test2 #{username}")
-			console.log("before hold")
-			hold(30000)
-			console.log("after hold")
+			@_updateListeningData(username) for username in Object.keys(@_eventListeners)
+			hold(60000)
 		null
 
 	# terms of service: "You will not make more than 5 requests per originating IP address per second, averaged over a 5 minute period"

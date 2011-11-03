@@ -1,30 +1,27 @@
 // ==UserScript==
-// @name          BuddyRadio
+// @name          BuddyRadio Debug
 // @namespace     http://github.com/neothemachine/
-// @version       0.3
-// @description   tbd
 // @include       http://grooveshark.com/*
 // ==/UserScript==
 
-if (window.top != window.self)  // don't run on iframes
-    return;
-	
-// TODO only execute if Grooveshark object available (takes some time!)
-// (or prevent it from running on http://grooveshark.com/upload etc.)
+(function ()
+{
+	if (window.top != window.self)  // don't run on iframes
+		return;
+		
+	var s = document.createElement("script");
+	s.type = "text/javascript";
+	s.src = "http://code.onilabs.com/apollo/0.13/oni-apollo.js";
+	s.addEventListener("load", loadRadioOnDelay, false);
+	document.body.appendChild(s);
 
-var s = document.createElement("script");
-s.type = "text/javascript";
-s.src = "http://code.onilabs.com/apollo/0.13/oni-apollo.js";
-s.addEventListener("load", loadRadioOnDelay, false);
-document.body.appendChild(s);
+	function loadRadioOnDelay() {
+		setTimeout(loadRadio, 666);
+	}
 
-function loadRadioOnDelay() {
-	setTimeout(loadRadio, 666);
-}
-
-function loadRadio() {	
-	var debugMultiLineHack = (<><![CDATA[
-(function() {
+	function loadRadio() {	
+		var debugMultiLineHack = (<><![CDATA[
+	(function() {
   var Controller, EOVR, LastFmApi, Model, View, http;
   var __bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; }, __hasProp = Object.prototype.hasOwnProperty, __extends = function(child, parent) {
     for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; }
@@ -1001,6 +998,7 @@ function loadRadio() {
         throw new Error("Grooveshark API has changed");
       }
       Grooveshark.setSongStatusCallback(this.handleGroovesharkEvent);
+      spawn(this._doPeriodicCleanup());
     }
     GroovesharkStreamingNetwork.prototype.findSongResource = function(artist, title, album) {
       var albumParam, response, url;
@@ -1074,7 +1072,6 @@ function loadRadio() {
     };
     GroovesharkStreamingNetwork.prototype.getPlayingPosition = function(songResource) {
       var gsSong, resources;
-      this.cleanup();
       gsSong = Grooveshark.getCurrentSongStatus().song;
       if ((gsSong != null) && gsSong.songID === songResource.songId) {
         resources = this.queuedSongResources.filter(function(resource) {
@@ -1089,7 +1086,16 @@ function loadRadio() {
         return null;
       }
     };
-    GroovesharkStreamingNetwork.prototype.cleanup = function() {
+    GroovesharkStreamingNetwork.prototype._doPeriodicCleanup = function() {
+      var _results;
+      _results = [];
+      while (true) {
+        this._cleanup();
+        _results.push(hold(5000));
+      }
+      return _results;
+    };
+    GroovesharkStreamingNetwork.prototype._cleanup = function() {
       var listener, oldDate, resource, _i, _len, _ref, _ref2, _results;
       if (this.queuedSongResources.length > 0 && this.queuedSongResources[0].length === null) {
         if ((Date.now() - this.currentSongShouldHaveStartedAt) > 10000) {
@@ -1190,27 +1196,20 @@ function loadRadio() {
   })();
   Model.LastFmBuddyNetwork = (function() {
     __extends(LastFmBuddyNetwork, Model.BuddyNetwork);
-    function LastFmBuddyNetwork() {
-      LastFmBuddyNetwork.__super__.constructor.apply(this, arguments);
-    }
     LastFmBuddyNetwork.prototype.name = "Last.fm";
     LastFmBuddyNetwork.prototype.className = "Model.LastFmBuddyNetwork";
+    function LastFmBuddyNetwork() {
+      spawn(this._periodicUpdate());
+    }
     LastFmBuddyNetwork.prototype._periodicUpdate = function() {
-      var listeners, username, _ref;
+      var username, _i, _len, _ref;
       while (true) {
-        console.log("loop");
-        _ref = this._eventListeners;
-        for (username in _ref) {
-          if (!__hasProp.call(_ref, username)) continue;
-          listeners = _ref[username];
-          console.log("test " + username);
-          console.log(this);
+        _ref = Object.keys(this._eventListeners);
+        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+          username = _ref[_i];
           this._updateListeningData(username);
-          console.log("test2 " + username);
         }
-        console.log("before hold");
-        hold(30000);
-        console.log("after hold");
+        hold(60000);
       }
       return null;
     };
@@ -1751,7 +1750,7 @@ function loadRadio() {
         songsPerFeedInARowValues = [1, 2, 3, 4, 5, 10, 15, 20, 30, 40, 50, 100];
         optionsSongsPerFeed = this._constructOptions(songsPerFeedInARowValues, this.radio.getSongsPerFeedInARow());
         optionsPreload = this._constructOptions([0, 1, 2, 3, 4, 5], this.radio.getPreloadCount());
-        $("body").append("<div id=\"buddyradio_settingsform\" style=\"position: absolute; top: " + position.top + "px; left: " + (position.left + 20) + "px; display: block;width: 310px\" class=\"buddyradio_overlay\">\n	<div>\n		Play \n		<select name=\"songsPerFeedInARow\">\n			" + optionsSongsPerFeed + "\n		</select>\n		song/s in a row from same buddy\n	</div>\n	<div style=\"margin-top: 5px\">\n		Preload\n		<select name=\"preloadCount\">\n			" + optionsPreload + "\n		</select>\n		song/s when playing historic radio\n	</div>\n	<div style=\"padding-top:10px\">\n		<button type=\"button\" class=\"btn_style1\">\n			<span>Apply</span>\n		</button>					\n	</div>\n</div>");
+        $("body").append("<div id=\"buddyradio_settingsform\" style=\"position: absolute; top: " + position.top + "px; left: " + (position.left + 20) + "px; display: block;width: 310px\" class=\"buddyradio_overlay\">\n	<div>\n		Play \n		<select name=\"songsPerFeedInARow\">\n			" + optionsSongsPerFeed + "\n		</select>\n		song/s in a row from same buddy\n	</div>\n	<div style=\"margin-top: 5px\">\n		Preload\n		<select name=\"preloadCount\">\n			" + optionsPreload + "\n		</select>\n		song/s when playing historic radio\n	</div>\n	<div style=\"padding-top:10px\">\n		<button type=\"button\" class=\"btn_style1\">\n			<span>Apply</span>\n		</button>					\n	</div>\n	<div style=\"margin-top:10px; float:right; text-align:right\">\n		BuddyRadio v0.3<br />\n		<a href=\"http://neothemachine.github.com/buddyradio\" target=\"_blank\">Project Page</a>\n	</div>\n</div>");
         return $("#buddyradio_settingsform button").click(__bind(function() {
           var preloadCount, songsPerFeed;
           songsPerFeed = $("#buddyradio_settingsform select[name=songsPerFeedInARow]")[0].value;
@@ -1941,14 +1940,15 @@ function loadRadio() {
     return Radio;
   })();
 }).call(this);
-	]]></>).toString();
-	
-	var sjsSrc = debugMultiLineHack;
-	unsafeWindow.SJS = sjsSrc;
-	unsafeWindow.require("local:buddyradio", {callback: radioLoaded, src: sjsSrc});
-}
+		]]></>).toString();
+		
+		var sjsSrc = debugMultiLineHack;
+		unsafeWindow.SJS = sjsSrc;
+		unsafeWindow.require("local:buddyradio", {callback: radioLoaded, src: sjsSrc});
+	}
 
-function radioLoaded(err, module) {
-	if (err) alert(err); //throw new Error('error: ' + err);
-	module.start();
-}
+	function radioLoaded(err, module) {
+		if (err) alert(err); //throw new Error('error: ' + err);
+		module.start();
+	}
+})();
