@@ -5,6 +5,7 @@
 // @description   Extends Grooveshark and lets you see and hear what your Last.fm friends listen to.
 // @author        Maik Riechert
 // @include       http://grooveshark.com/*
+// @include       http://preview.grooveshark.com/*
 // ==/UserScript==
 
 /*

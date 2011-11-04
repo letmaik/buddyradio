@@ -15,6 +15,9 @@ $files =
 	"Model\Grooveshark",
 	"Model\LastFm",
 	"View\View",
+	"View\Grooveshark",
+	"View\GroovesharkV1",
+	"View\GroovesharkV2",
 	"Controller\Controller"
 foreach ($file in $files) {
     $main += Get-Content ($file + ".coffee")

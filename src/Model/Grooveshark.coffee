@@ -156,8 +156,6 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 				console.debug("song length set to #{resource.length} ms (songId #{song.songID})")
 		
 		# check if song was skipped
-		console.log(@queuedSongResources)
-		console.log(song.songID)
 		while @queuedSongResources[0].songId != song.songID
 			resource = @queuedSongResources.shift()
 			listener("streamingSkipped", resource) for listener in @eventListeners

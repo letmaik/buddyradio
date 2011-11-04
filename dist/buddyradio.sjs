@@ -11,7 +11,7 @@
   exports.start = function() {
     var controller;
     controller = new Controller.Radio([new Model.LastFmBuddyNetwork], [new Model.GroovesharkStreamingNetwork]);
-    new View.BuddySidebarSection(controller);
+    new View.Grooveshark(controller);
     return controller.start();
   };
   exports.classes = function() {
@@ -1054,7 +1054,7 @@
         resources = this.queuedSongResources.filter(function(resource) {
           return resource === songResource;
         });
-        if (resources.length === 1 && resources[0].length !== null && Math.round(gsSong.calculatedDuration) > resources[0].length) {
+        if (resources.length === 1 && (resources[0].length != null) && Math.round(gsSong.calculatedDuration) > resources[0].length) {
           console.debug("song length corrected from " + resources[0].length + "ms to " + (Math.round(gsSong.calculatedDuration)) + "ms");
           resources[0].length = Math.round(gsSong.calculatedDuration);
         }
@@ -1074,7 +1074,7 @@
     };
     GroovesharkStreamingNetwork.prototype._cleanup = function() {
       var listener, oldDate, resource, _i, _len, _ref, _ref2, _results;
-      if (this.queuedSongResources.length > 0 && this.queuedSongResources[0].length === null && (this.currentSongShouldHaveStartedAt != null)) {
+      if (this.queuedSongResources.length > 0 && !(this.queuedSongResources[0].length != null) && (this.currentSongShouldHaveStartedAt != null)) {
         if ((Date.now() - this.currentSongShouldHaveStartedAt) > 10000) {
           console.warn("grooveshark got stuck... trying to re-add current song");
           resource = this.queuedSongResources.shift();
@@ -1134,8 +1134,6 @@
           console.debug("song length set to " + resource.length + " ms (songId " + song.songID + ")");
         }
       }
-      console.log(this.queuedSongResources);
-      console.log(song.songID);
       while (this.queuedSongResources[0].songId !== song.songID) {
         resource = this.queuedSongResources.shift();
         _ref = this.eventListeners;
@@ -1611,8 +1609,20 @@
     return LastFmHistoricSongFeed;
   })();
   View = {};
-  View.BuddySidebarSection = (function() {
-    function BuddySidebarSection(controller) {
+  View.Grooveshark = (function() {
+    function Grooveshark(controller) {
+      if ($("#header_mainNavigation").length === 1) {
+        new View.GroovesharkV2(controller);
+      } else if ($("#sidebar .container_inner").length === 1) {
+        new View.GroovesharkV1(controller);
+      } else {
+        throw new Error("Couldn't detect version of Grooveshark");
+      }
+    }
+    return Grooveshark;
+  })();
+  View.GroovesharkV1 = (function() {
+    function GroovesharkV1(controller) {
       this.controller = controller;
       this._showMoreMenu = __bind(this._showMoreMenu, this);
       this.handleBuddyManagerEvent = __bind(this.handleBuddyManagerEvent, this);
@@ -1636,7 +1646,7 @@
         }
       }, this));
     }
-    BuddySidebarSection.prototype.handleRadioEvent = function(name, data) {
+    GroovesharkV1.prototype.handleRadioEvent = function(name, data) {
       if (name === "tunedIn") {
         this._applyStyle(data);
       } else if (name === "nowPlaying" && data.buddy !== data.lastPlayingBuddy) {
@@ -1653,7 +1663,7 @@
         return alert("Radio for " + data.buddy.username + " was stopped because the user has disabled access to his song listening data.");
       }
     };
-    BuddySidebarSection.prototype.handleBuddyManagerEvent = function(name, data) {
+    GroovesharkV1.prototype.handleBuddyManagerEvent = function(name, data) {
       if (["buddyRemoved", "buddyAdded", "statusChanged", "lastSongChanged", "buddiesLoaded"].indexOf(name) !== -1) {
         this.refresh();
       }
@@ -1663,7 +1673,7 @@
         }
       }
     };
-    BuddySidebarSection.prototype._applyStyle = function(buddy) {
+    GroovesharkV1.prototype._applyStyle = function(buddy) {
       var classes, el;
       if (!(buddy != null)) return;
       el = $("li.sidebar_buddy[rel='" + buddy.network.className + "-" + buddy.username + "']");
@@ -1678,7 +1688,7 @@
       if (this.radio.isOnAir(buddy)) classes += " buddy_nowplaying";
       return el.addClass(classes);
     };
-    BuddySidebarSection.prototype.init = function() {
+    GroovesharkV1.prototype.init = function() {
       var newButton;
       $("head").append("<style type=\"text/css\">\n	#sidebar_buddyradio_wrapper .divider .sidebarHeading a {\n		display: none;\n	}\n	#sidebar_buddyradio_wrapper .divider:hover .sidebarHeading a {\n		display: inline;\n	}\n	.buddyradio_overlay {\n		background: none repeat scroll 0 0 #FFFFFF;\n		border: 1px solid rgba(0, 0, 0, 0.25);\n		border-radius: 3px 3px 3px 3px;\n		padding: 5px;\n		color: black;\n		max-height: 325px;\n		overflow-x: hidden;\n		overflow-y: auto;\n		position: absolute;\n		z-index: 9999;\n	}\n	.sidebar_buddy a .icon {\n		/* Some icons by Yusuke Kamiyamane. All rights reserved. Licensed under Creative Commons Attribution 3.0. */\n		background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAAAgCAYAAADtwH1UAAAABGdBTUEAALGPC/xhBQAAAAlwSFlzAAAOvwAADr8BOAVTJAAAABp0RVh0U29mdHdhcmUAUGFpbnQuTkVUIHYzLjUuMTAw9HKhAAAMLUlEQVRoQ+1aC1RVZRY+PHJKrSwfPWDMfJsYJgMiIiYKEoiogJkiKE2Aimj4QJw0LfKBIBkIEpGIT3wb5hIjVFZjwVwBEeQpr3hoAYooKmJ79nfWvXTu5V4hr2uaWcO/1rf+/e/97f/8Z+9z/nPO3VcQVNo5T31bxpbT7vr2qrbO8X8gAinz9UObs2MaEufo7ZAejvWTYUPf0WV8MkroFmwuOH5uKQQzUhmJ298WHDvqz7wujDcYuBi8GHMZQ9rx78v2DxmxjKPyHmPo1bbav3s5133gXcKgDqAE/EetoevRvn0Hnx2zcVysXdQU/+nLXV1dPRnOjNEuLi7PPnL9yfP0w34rOkBHZ+l9LSVCfy8rugF9ewH06St08xsgvOs/WEiMe3do9Um/cY0s71k+ROjWni/sOjo6f2FYMJY5OzunBAcHl7LsDX07/pZsP8xIlAcfMpKA8SEG7G3az24eJfcuXaKONPDA17SOpxMMnMekO5TNT1paKsvLK62qrb0HQI7cufPgPE/PBXxOQzWeR5KH/hcPC/bRAVe9PZC5/5y3o3eOz9aLgR66RwVh/iuC1fsGQmLE1MHVqWsdaM+8UbTVvi+xTiZH4geGmu8CDrIRYw0v8sLu3bspJCSE1qxZQ6wLk2MN96Zq1vBX1iUwvpEHez/3exnoEfwTcjt4Si1vmjM9fPiQHjx40C5aWloIfLUxiOvpaCazuzYpZWZLVmUx/drQQCnnz4s9UFRTQ2czMn72WrBg1bRp09Qn4dRcvYiWK7spfobuwaZ/bb+FviDaOQ099LBrSsB7PQW72b0E2bmP3qGDXqNpg/XLFDljEH3jN5bCHPoRbOBo8kdgGZG7du2isLAw8vf3p3Xr1lFUVBQFBgYiCZEago8pPRhHGAcY8QzcwV/Je4yhhx08pfaTtQ01NzdTU1NTu7h//z6B3+Ycvnzx1V5HBqXb5M6klakb6PrNm2LQcQEpEgBdVlkZpWZm/uzm7u7r6Oj4XJt5Et30djRfjqOvnHSPq+thVxfA6c8KdjOeE2RnVk6kz6e8TolLLOnYInMKtjUg7wECbZz4MsW5DSNwwFWdgwNrzojlJgYbQY+IiKAVK1bQzJkzxWRs3rwZSYgFV80a/Fm3Wx5wmLczwuU9xkgIEgGeUjtjak53796lBg6YArW1tVRRXk75eXmUzdtORkaGiKKiIgK/zfEjeviO+MnqhknSRDpyJak16EFBQa0yElFYXU0ZpaUUGRt72N7e3qLNPNhq7mfFUt3ZEEJftH9JHfrUz2wL0cMudVpqINj5vSLIHJ4WZCeXjqN1lr3ocvwyapJF8/Yzgo4HThVl6AJNn6VwJ0MCFz7w1dfXN2Zs5KDu3rFjB/n6+lJycjJdvXpVvHpiYmJEGTpvb2/xjgAXPvCVrGUZy1EMxRa5meVNDPRo0EcywFNqx98YQXfu3KH6+no6O2cunXrbmi5z0LOzskScHD+BTju7inIBJwT8NoELfW6/Sf7EB0b7LSjpSjrJeM2Am5tbq6zQof8xO7vc1tZ2ttI8h97V63V6ocGhuxe/JE04PEtvp9Tp0zcFWeaOD2itxYu0d74xhTj0pzvpUWoB25bJvUUufOCrq6u78syZM7R48WIKDQ2l1atXi1eZOsCGuwNc+MBXspZFLG9hbGAEMz5mrJH3GEMPO3jK5z1gEN2+fZtqqqqoJieXDvH4+JixlJ+bI/YYQ49xcUG+OG6dIKh7tPBZdxkwvMyShkWb0bAoM3I/7iNe+U5OTkp3QM2NG2JCrlRU3LO2tlZeS8JMPa/COM/ia0kbqOb0Z1T+zcdUfGgVFR0MoKuHA6nq1KfEHNzGrS1ivJB4PSno/jbHfhTlPJAyon2o8ccI8nJ1FXupDNtWewMCFz7w5YnmpKWl1eLKxu166tQpys/PJ35lE3upDBseyODCB76SpcxneS1jNQOJWc7AdoM+QK6HHTyldqT/QKr79RcqLy6ksqIC+iXvCkGnAMbQAxVXi0R96wRru9kJH3WV9St7ixQwDjenhEsnyNTUlAICAsjOzk48H09PT/Lz86O4hAQqqKq6Z2VltVhpIXtddPdh66nmQFeeXE+FCSspM3YhXYzxoUs7fcUxOFInvNcnLR9TFu8+gk4G2NDNH7aJ6P/CC9SUs0sEZIUeHHDhI/8mGMK3ady2bdsIbz25ubkiTExMqKSkRARkhR4ccOHD65B+E8ySB9yP+4UMH4a3vMeVBj0SAp5S+3bQIKqt4au/vLQV9Zx86NFL9deYA73SBL5d7ISFT8n6lAyhYetHUoLsmHjVF/Neb25uLvYKFLEsKyigzLy8CgsLC3eleXbxm07NyY/vVCauo4oTa6lg//LWBGRxAvL2fviAOXi1U2ocyD0MWVPWV78V8N1Sfy6UbvPzguq/EwEZOtjAARc+kklmsOxVWVnZgoBf4v23uLhY3JMByNDhbgAHXAZ8pG2qXP8+9/MYODk3eY8x9PADT6mdNxpODddr6EZNpRLuNd5qowMHfNU5XrU39Ojp1acqMjmesM0o3nwQeIWMHrbLFRUUHROTyHfIeKV5Ypx039vn8VJyxbHApvJjH1H+vmW/J+DrRZQePqf2y6m6bb4DOJjdGPvw3Ejd5k6nN7pQxbef0K2MGBGQoYMNHHDhIzn4Uyy7VPDCEOSLFy/SsWPHKDw8XARk6GADB1wGfKTNlge4ut9jzJRzkCRwMYYNAE+pZZqa0L26X+hu7bUOAXzVOUaNGtVj4qRJAek5OdWVdXVKQZcmoIptuYWF1TY2NgHwUZ1H+MJeZ+7O2X1+qOK7IG+vv1ICjiwekcP2NnsoJgmzFBx2uhjmlh/9R/Pl+CV0ePVkivYyEQEZOtjAAbfNgQVhqJmZ2cbU1NSbKSkptGXLFrpw4YIIyNDBBg77qvuIsWL9WAaucFxZ+PlikrzHGHrYwVNqV8ePLbn9fRK13KxtF+CBr2b9gpGRkbG9g8NmBLi+sbFNEqArKimpnjJlymZw1c0h2A7Q6Rpso5OUGT2/ofDACsriKx/PgLObpt8MttU94/M3nV5qHVk5/RXBY8Wbz/90aIldTQ0/Q+pSw0RAhg42cDT58+ullaGhYRi/7fAzNo3O81ckABk62MDR4I+kvCa/wvtzb83AMwI9xjYM/B6kmryeoUZDF1bbTii7bjuB2gN4oW8MwTOlp7p19O7de5SxsfH6kNDQ7/IKCqpvNDbev8nI56Rs3br1u5EjR64HR52vLiu7Mvo4DBZmfzpBOBdkLaQpgPHkgWLw+jF6MPQkk+iz/BJjuKG+4GDRRdhk00U4OrmL8E8AMnSwMWcE42UGfBSt1Z8DPImxlBHKiJMDMnS4otX5K+bBj3fD5eeBjzX88IUe5wU97KoNNqz91T8A8OGn2nC8gfx9YvnMM8+4d+/efRVjoxyroIONObgwnmfoSCfAAPsq9uYXNCwKB+7BeJqBhCka5O6MPh04CcwB7pP0VxOLP0WFHwtf7EAMsIsghjqCl5cXaQMqPUtaYZ1ApAX+lDCrOehj11G0CT58tQo+kqdF8OH735KAx66jdCbgyaTwsesonQl4Mgl47DqKagIUVaEO61WeAUV+AgGqW5MmfZstSLEA1a1Jg/7JhE/7WR67jqIp0DhfhU1aqmvD15AAaRIUwVeXGI0JwEEVSZAuQCUx2ofuycygqY4S5N4lKThxEa30GfmjvDasXBdWtwVpqo2q5ap5C5IG/JHB1/QQ1rQANQ/sJxM+7WdRraNs3zP91mSZE9l876pUmpSWJcWjanoGqMZAI0/Da6hqEjS+LWl6C1JdgAae9qHTfgZ1dZSJieNIUZ6UlialZUmxJNmZAO0ToK6OMvrCBJKWJ6WlSUVZUixJdm5B2idAWkeZE2VBw0NeJ2l1TLUypqiKiRWxzoew9gmQ1lHi4+fS8KDXlKpj0sqYtComVsQ6/Lop35M7+hb0//QaqlpHidnuQtLqmGplTFEVEytinR9i2t8BmEG1jhK6bBalZ6SRuuKMoigjFmQ6E/BkEqBaRzmxyYM2LJ1F2dkXf5NWxKRFmUe+hnY0MZ0/xok/q6utoywYrZ8zw8yg7FJ21o36W7eaUZjhv94kKxVlOhroP/od0OHE/O//GqqpjtKPE4N/dr/FQPkRlbjXGYYMFH9QE9D5N60xRAfe77HdAAAAAElFTkSuQmCC)\n		            no-repeat scroll 0 0 transparent;\n	}\n	.sidebar_buddy a .icon:hover, .sidebar_buddy.buddy_nowplaying.buddy_feedenabled_historic a .icon:hover {\n		background-position: -64px 0 !important;\n	}\n	.sidebar_buddy a:hover {\n		background-color: #FFDFBF;\n	}\n	.sidebar_buddy a:hover .label {\n		margin-right: 20px;\n	}\n	.sidebar_buddy a:hover .icon.remove {\n		background-position: -16px -16px !important;\n		display: block;\n	}\n	.sidebar_buddy a:active {\n		background-color: #FF8000;\n	}\n	.sidebar_buddy a:active .label {\n		color: #FFFFFF !important;\n	}\n	.sidebar_buddy a:active .icon.remove {\n		background-position: -32px -16px !important;\n		display: block;\n	}\n	.buddy_nowplaying a .icon {\n		background-position: 0 0 !important;\n	}\n	.buddy_nowplaying.buddy_feedenabled_historic a .icon {\n		background-position: -80px -16px !important;\n	}\n	.buddy_feedenabled.buddy_feedenabled_historic a .icon {\n		background-position: -80px 0;\n	}\n	.buddy_feedenabled a .label {\n		font-weight: bold;\n	}\n	.buddy_live a .label, .buddy_live a:hover .label {\n		color: #FF8000;\n	}\n	.buddy_live a .icon {\n		background-position: -16px 0;\n	}\n	.buddy_off a .label, .buddy_off a:hover .label {\n		color: black;\n	}\n	.buddy_off a .icon {\n		background-position: -32px 0;\n	}\n	.buddy_disabled a .label, .buddy_disabled a:hover .label {\n		color: gray;\n	}\n	.buddy_disabled a .icon {\n		background-position: -48px 0;\n	}\n</style>");
       $("#sidebar .container_inner").append("<div id=\"sidebar_buddyradio_wrapper\" class=\"listWrapper\">\n            <div class=\"divider\" style=\"display: block;\">\n                <span class=\"sidebarHeading\">Buddy Radio\n			<a id=\"buddyradio_settingsLink\">Settings</a>\n		</span>\n                <a class=\"sidebarNew\"><span>Add Buddy</span></a>\n            </div>\n            <ul id=\"sidebar_buddyradio\" class=\"link_group\">\n		<li> \n			<span class=\"label ellipsis\">loading...</span>\n		</li>\n	</ul>\n        </div>");
@@ -1741,7 +1751,7 @@
         }, this));
       }, this));
     };
-    BuddySidebarSection.prototype._constructOptions = function(options, selected) {
+    GroovesharkV1.prototype._constructOptions = function(options, selected) {
       if (selected == null) selected = null;
       return options.map(function(n) {
         var sel;
@@ -1749,7 +1759,7 @@
         return "<option value=\"" + n + "\"" + sel + ">" + n + "</option>";
       }).join();
     };
-    BuddySidebarSection.prototype.refresh = function() {
+    GroovesharkV1.prototype.refresh = function() {
       var buddy, song, sortedBuddies, status, _i, _len;
       console.debug("refreshing view");
       $("#sidebar_buddyradio").empty();
@@ -1808,8 +1818,8 @@
         return this.controller.tune(networkClassName, username);
       }, this));
     };
-    BuddySidebarSection.prototype._currentlyOpenedMenu = null;
-    BuddySidebarSection.prototype._showMoreMenu = function(networkClassName, username) {
+    GroovesharkV1.prototype._currentlyOpenedMenu = null;
+    GroovesharkV1.prototype._showMoreMenu = function(networkClassName, username) {
       var buddy, feedInfo, feedType, position;
       buddy = this.controller.getBuddy(networkClassName, username);
       if ($("#buddyradio_more").length === 1) {
@@ -1867,7 +1877,260 @@
         }, this));
       }
     };
-    return BuddySidebarSection;
+    return GroovesharkV1;
+  })();
+  View.GroovesharkV2 = (function() {
+    function GroovesharkV2(controller) {
+      this.controller = controller;
+      this._showMoreMenu = __bind(this._showMoreMenu, this);
+      this.handleBuddyManagerEvent = __bind(this.handleBuddyManagerEvent, this);
+      this.handleRadioEvent = __bind(this.handleRadioEvent, this);
+      this.radio = this.controller.radio;
+      this.radio.registerListener(this.handleRadioEvent);
+      this.radio.buddyManager.registerListener(this.handleBuddyManagerEvent);
+      this.init();
+      this._cprInProgress = false;
+      $(document).bind("DOMNodeRemoved", __bind(function(e) {
+        if ($("#sidebar_buddyradio_wrapper").length === 0 && $("#sidebar_pinboard").length === 1 && !this._cprInProgress) {
+          this._cprInProgress = true;
+          hold(1000);
+          this.init();
+          this.refresh();
+          return this._cprInProgress = false;
+        }
+      }, this));
+    }
+    GroovesharkV2.prototype.handleRadioEvent = function(name, data) {
+      if (name === "tunedIn") {
+        this._applyStyle(data);
+      } else if (name === "nowPlaying" && data.buddy !== data.lastPlayingBuddy) {
+        this._applyStyle(data.buddy);
+        this._applyStyle(data.lastPlayingBuddy);
+      } else if (name === "nobodyPlaying") {
+        this._applyStyle(data.lastPlayingBuddy);
+      } else if (name === "tunedOut") {
+        this._applyStyle(data.buddy);
+      } else if (name === "errorTuningIn" && data.reason === "disabled") {
+        alert("Can't tune in. " + data.buddy.username + " has disabled access to his song listening data.");
+      }
+      if (name === "tunedOut" && data.reason === "disabled") {
+        return alert("Radio for " + data.buddy.username + " was stopped because the user has disabled access to his song listening data.");
+      }
+    };
+    GroovesharkV2.prototype.handleBuddyManagerEvent = function(name, data) {
+      if (["buddyRemoved", "buddyAdded", "statusChanged", "lastSongChanged", "buddiesLoaded"].indexOf(name) !== -1) {
+        this.refresh();
+      }
+      if (name === "buddyNotAdded") {
+        if (data.reason === "notFound") {
+          return alert("The buddy with username " + data.username + " couldn't be found.");
+        }
+      }
+    };
+    GroovesharkV2.prototype._applyStyle = function(buddy) {
+      var classes, el;
+      if (!(buddy != null)) return;
+      el = $("a.sidebar_buddy[rel='" + buddy.network.className + "-" + buddy.username + "']");
+      el.removeClass("buddy_nowplaying buddy_feedenabled buddy_feedenabled_historic buddy_live buddy_off buddy_disabled");
+      classes = "buddy_" + buddy.listeningStatus;
+      if (this.radio.isFeedEnabled(buddy)) {
+        classes += " buddy_feedenabled";
+        if (this.radio.getFeedType(buddy) === "historic") {
+          classes += " buddy_feedenabled_historic";
+        }
+      }
+      if (this.radio.isOnAir(buddy)) classes += " buddy_nowplaying";
+      return el.addClass(classes);
+    };
+    GroovesharkV2.prototype.init = function() {
+      var newButton;
+      $("head").append("<style type=\"text/css\">\n	#sidebar_buddyradio_wrapper {\n		display: block;\n	}\n	.buddyradio_overlay {\n		background: none repeat scroll 0 0 #F5F5F5;\n		border: 1px solid rgba(0, 0, 0, 0.25);\n		border-radius: 3px 3px 3px 3px;\n		padding: 5px;\n		color: black;\n		max-height: 325px;\n		overflow-x: hidden;\n		overflow-y: auto;\n		position: absolute;\n		z-index: 9999;\n	}\n	a.sidebar_buddy .icon {\n		/* Some icons by Yusuke Kamiyamane. All rights reserved. Licensed under Creative Commons Attribution 3.0. */\n		background: url(data:image/png;base64,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)\n		            no-repeat scroll 0 0 transparent;\n	}\n	a.sidebar_buddy .icon:hover, a.sidebar_buddy.buddy_nowplaying.buddy_feedenabled_historic .icon:hover {\n		background-position: -64px 0 !important;\n	}\n	a.sidebar_buddy:hover .label {\n		margin-right: 20px;\n	}\n	a.sidebar_buddy:hover .icon.remove {\n		background-position: -48px -16px !important;\n		display: block;\n	}\n	a.sidebar_buddy:hover .icon.remove:hover {\n		background-position: -64px -16px !important;\n		display: block;\n	}\n	a.buddy_nowplaying .icon {\n		background-position: 0 0 !important;\n	}\n	a.buddy_nowplaying.buddy_feedenabled_historic .icon {\n		background-position: -80px -16px !important;\n	}\n	a.buddy_feedenabled.buddy_feedenabled_historic .icon {\n		background-position: -80px 0;\n	}\n	a.buddy_feedenabled .label {\n		font-weight: bold;\n	}\n	a.buddy_live .label, a.buddy_live:hover .label {\n		color: #FF8000;\n	}\n	a.buddy_live .icon {\n		background-position: -16px 0;\n	}\n	a.buddy_off .label, a.buddy_off:hover .label {\n		color: black;\n	}\n	a.buddy_off .icon {\n		background-position: -32px 0;\n	}\n	a.buddy_disabled .label, a.buddy_disabled:hover .label {\n		color: gray;\n	}\n	a.buddy_disabled .icon {\n		background-position: -48px 0;\n	}\n</style>");
+      $("#sidebar_pinboard .overview").append("<a id=\"sidebar_buddyradio_divider\" class=\"sidebar_pin_divider\">\n	<span class=\"sidebar_pin_collapse\"></span>\n	<span class=\"sidebar_pin_heading\">Buddy Radio</span>\n</a>\n<div id=\"sidebar_buddyradio_wrapper\" class=\"sidebar_pin_group\">\n            <div id=\"sidebar_buddyradio\" class=\"link_group\">\n		<span class=\"buddyradio_users\">\n			<span class=\"label ellipsis\">loading...</span>\n		</span>				\n		<a class=\"sidebar_link\" id=\"buddyradio_addLink\">\n			<span class=\"label\">Add...</span>\n		</a>\n		<a class=\"sidebar_link\" id=\"buddyradio_settingsLink\">\n			<span class=\"label\">Settings</span>\n		</a>\n	</div>	\n        </div>");
+      newButton = $("#buddyradio_addLink");
+      newButton.click(__bind(function() {
+        var onConfirmAddBuddy, onConfirmImportBuddies, position;
+        if ($("#buddyradio_newuserform").length === 1) {
+          $("#buddyradio_newuserform").remove();
+          return;
+        }
+        position = newButton.offset();
+        $("body").append("<div id=\"buddyradio_newuserform\" style=\"position: absolute; top: " + (position.top + 20) + "px; left: " + (position.left + 20) + "px; display: block;width: 260px; height: 80px;\" class=\"jjmenu\">\n	<div class=\"jj_menu_item\">\n		<div style=\"width: 100px;float:left\" class=\"input_wrapper\">\n			<div class=\"cap\">\n				<input type=\"text\" id=\"buddyradio_newuser\" name=\"buddy\" /> \n			</div>\n		</div>\n		<button id=\"buddyradio_adduserbutton\" type=\"button\" class=\"btn_style1\" style=\"margin: 4px 0 0 5px\">\n			<span>Add Last.fm Buddy</span>\n		</button>\n	</div>\n	<div class=\"jj_menu_item\" style=\"clear:both\">\n		<div class=\"input_wrapper\" style=\"width: 100px; float: left;\">\n			<div class=\"cap\">\n				<input type=\"text\" name=\"buddy\" id=\"buddyradio_importusers\"> \n			</div>\n		</div>\n		<button style=\"margin: 4px 0pt 0pt 5px;\" class=\"btn_style1\" type=\"button\" id=\"buddyradio_importusersbutton\">\n			<span>Import my Last.fm Buddies</span>\n		</button>\n		\n	</div>\n</div>");
+        $("#buddyradio_newuser").focus();
+        onConfirmAddBuddy = __bind(function() {
+          $("#buddyradio_adduserbutton span").html("Adding Buddy...");
+          this.controller.addBuddy("Model.LastFmBuddyNetwork", $("#buddyradio_newuser")[0].value);
+          return $("#buddyradio_newuserform").remove();
+        }, this);
+        $("#buddyradio_adduserbutton").click(onConfirmAddBuddy);
+        $("#buddyradio_newuser").keydown(__bind(function(event) {
+          if (event.which === 13) return onConfirmAddBuddy();
+        }, this));
+        onConfirmImportBuddies = __bind(function() {
+          var result, username;
+          username = $("#buddyradio_importusers")[0].value;
+          if (!username) {
+            alert("You need to enter the user name from which you want to import the Last.fm buddies.");
+            return;
+          }
+          $("#buddyradio_importusersbutton span").html("Importing Buddies...");
+          result = this.controller.importBuddies("Model.LastFmBuddyNetwork", username);
+          if (result.error === "invalid_user") {
+            alert("The user name you entered doesn't exist on Last.fm!");
+          }
+          return $("#buddyradio_newuserform").remove();
+        }, this);
+        $("#buddyradio_importusersbutton").click(onConfirmImportBuddies);
+        return $("#buddyradio_importusers").keydown(__bind(function(event) {
+          if (event.which === 13) return onConfirmImportBuddies();
+        }, this));
+      }, this));
+      return $("#buddyradio_settingsLink").click(__bind(function() {
+        var optionsPreload, optionsSongsPerFeed, position, songsPerFeedInARowValues;
+        if ($("#buddyradio_settingsform").length === 1) {
+          $("#buddyradio_settingsform").remove();
+          return;
+        }
+        position = $("#buddyradio_settingsLink").offset();
+        songsPerFeedInARowValues = [1, 2, 3, 4, 5, 10, 15, 20, 30, 40, 50, 100];
+        optionsSongsPerFeed = this._constructOptions(songsPerFeedInARowValues, this.radio.getSongsPerFeedInARow());
+        optionsPreload = this._constructOptions([0, 1, 2, 3, 4, 5], this.radio.getPreloadCount());
+        $("body").append("<div id=\"buddyradio_settingsform\" style=\"position: absolute; top: " + (position.top + 20) + "px; left: " + (position.left + 20) + "px; display: block;width: 310px\" class=\"buddyradio_overlay\">\n	<div>\n		Play \n		<select name=\"songsPerFeedInARow\">\n			" + optionsSongsPerFeed + "\n		</select>\n		song/s in a row from same buddy\n	</div>\n	<div style=\"margin-top: 5px\">\n		Preload\n		<select name=\"preloadCount\">\n			" + optionsPreload + "\n		</select>\n		song/s when playing historic radio\n	</div>\n	<div style=\"padding-top:10px\">\n		<button type=\"button\" class=\"btn_style1\">\n			<span>Apply</span>\n		</button>					\n	</div>\n	<div style=\"margin-top:10px; float:right; text-align:right\">\n		BuddyRadio v0.3<br />\n		<a href=\"http://neothemachine.github.com/buddyradio\" target=\"_blank\">Project Page</a>\n	</div>\n</div>");
+        return $("#buddyradio_settingsform button").click(__bind(function() {
+          var preloadCount, songsPerFeed;
+          songsPerFeed = $("#buddyradio_settingsform select[name=songsPerFeedInARow]")[0].value;
+          preloadCount = $("#buddyradio_settingsform select[name=preloadCount]")[0].value;
+          this.controller.setSongsPerFeedInARow(parseInt(songsPerFeed));
+          this.controller.setPreloadCount(parseInt(preloadCount));
+          return $("#buddyradio_settingsform").remove();
+        }, this));
+      }, this));
+    };
+    GroovesharkV2.prototype._constructOptions = function(options, selected) {
+      if (selected == null) selected = null;
+      return options.map(function(n) {
+        var sel;
+        sel = selected === n ? " selected" : "";
+        return "<option value=\"" + n + "\"" + sel + ">" + n + "</option>";
+      }).join();
+    };
+    GroovesharkV2.prototype.refresh = function() {
+      var buddy, song, sortedBuddies, status, _i, _len;
+      console.debug("refreshing view");
+      $("#sidebar_buddyradio .buddyradio_users").empty();
+      sortedBuddies = this.radio.buddyManager.buddies.slice();
+      sortedBuddies.sort(function(a, b) {
+        if (a.listeningStatus === b.listeningStatus) {
+          if (a.username.toLowerCase() < b.username.toLowerCase()) {
+            return -1;
+          } else {
+            return 1;
+          }
+        } else if (a.listeningStatus === "live") {
+          return -1;
+        } else if (b.listeningStatus === "live") {
+          return 1;
+        } else if (a.listeningStatus === "off") {
+          return -1;
+        } else {
+          return 1;
+        }
+      });
+      for (_i = 0, _len = sortedBuddies.length; _i < _len; _i++) {
+        buddy = sortedBuddies[_i];
+        status = buddy.listeningStatus.toUpperCase();
+        if ((status === "LIVE" || status === "OFF") && (buddy.lastSong != null)) {
+          song = "" + buddy.lastSong.artist + " - " + buddy.lastSong.title;
+          if (status === "LIVE") {
+            status += ", listening to: " + song;
+          } else if (status === "OFF" && (buddy.lastSong != null)) {
+            status += ", last listened to: " + song;
+          }
+        }
+        $("#sidebar_buddyradio .buddyradio_users").append("<a rel=\"" + buddy.network.className + "-" + buddy.username + "\" class=\"sidebar_buddy buddy sidebar_link\">\n	<span class=\"icon remove\"></span>\n	<span class=\"icon more\"></span>\n	<span class=\"label ellipsis\" title=\"" + buddy.username + " (" + buddy.network.name + ") - " + status + "\">" + buddy.username + "</span>\n</a>");
+        this._applyStyle(buddy);
+      }
+      $("a.sidebar_buddy .more").click(__bind(function(event) {
+        var entry, networkClassName, username, _ref;
+        event.preventDefault();
+        event.stopPropagation();
+        entry = $(event.currentTarget).parent();
+        _ref = entry.attr("rel").split("-"), networkClassName = _ref[0], username = _ref[1];
+        return this._showMoreMenu(networkClassName, username);
+      }, this));
+      $("a.sidebar_buddy .remove").click(__bind(function(event) {
+        var networkClassName, username, _ref;
+        event.preventDefault();
+        event.stopPropagation();
+        _ref = $(event.currentTarget).parent().attr("rel").split("-"), networkClassName = _ref[0], username = _ref[1];
+        return this.controller.removeBuddy(networkClassName, username);
+      }, this));
+      return $("a.sidebar_buddy").click(__bind(function(event) {
+        var networkClassName, username, _ref;
+        event.preventDefault();
+        _ref = $(event.currentTarget).attr("rel").split("-"), networkClassName = _ref[0], username = _ref[1];
+        return this.controller.tune(networkClassName, username);
+      }, this));
+    };
+    GroovesharkV2.prototype._currentlyOpenedMenu = null;
+    GroovesharkV2.prototype._showMoreMenu = function(networkClassName, username) {
+      var buddy, feedInfo, feedType, position;
+      buddy = this.controller.getBuddy(networkClassName, username);
+      if ($("#buddyradio_more").length === 1) {
+        $("#buddyradio_more").remove();
+        if (this._currentlyOpenedMenu === buddy) {
+          this._currentlyOpenedMenu = null;
+          return;
+        }
+      }
+      this._currentlyOpenedMenu = buddy;
+      position = $("a.sidebar_buddy[rel='" + networkClassName + "-" + username + "'] .more").offset();
+      if (!(position != null)) return;
+      feedInfo = "";
+      if (this.radio.isFeedEnabled(buddy)) {
+        feedType = this.radio.getFeedType(buddy);
+        feedInfo = "<div style=\"margin-bottom:10px\">Tuned into <strong>" + feedType + "</strong> radio.<br />";
+        if (feedType === "historic") {
+          feedInfo += "" + (this.radio.getAlreadyFeededCount(buddy)) + " of " + (this.radio.getTotalCountForHistoricFeed(buddy)) + " songs enqueued so far.";
+        } else {
+          feedInfo += "" + (this.radio.getAlreadyFeededCount(buddy)) + " songs enqueued so far.";
+        }
+        feedInfo += "</div>";
+      }
+      $("body").append("<div id=\"buddyradio_more\" style=\"position: absolute; top: " + (position.top + 20) + "px; left: " + (position.left + 20) + "px; display: block;width: 260px\" class=\"buddyradio_overlay\">\n	" + feedInfo + "\n	<div class=\"buttons\">\n		<img style=\"float:left; padding-right:10px;\" src=\"" + buddy.avatarUrl + "\" />\n		<button type=\"button\" class=\"btn_style1 viewprofile\">\n			<span>View Profile on " + buddy.network.name + "</span>\n		</button>\n	</div>\n</div>");
+      $("#buddyradio_more button.viewprofile").click(__bind(function() {
+        window.open(buddy.profileUrl);
+        $("#buddyradio_more").remove();
+        return this._currentlyOpenedMenu = null;
+      }, this));
+      if (buddy.supportsHistoricFeed()) {
+        $("#buddyradio_more div.buttons").append("<button style=\"margin-top: 5px\" type=\"button\" class=\"btn_style1 fetchlastweek\">\n	<span>Listen previously played songs</span>\n</button>");
+        $("#buddyradio_more").append("<div class=\"lastweekdata\" style=\"clear:both\"></div>");
+        return $("#buddyradio_more button.fetchlastweek").click(__bind(function() {
+          var date, day, el, today, todaysDay, _ref;
+          $("#buddyradio_more button.fetchlastweek span").html("Checking last week's songs...");
+          el = $("#buddyradio_more .lastweekdata");
+          today = new Date();
+          todaysDay = today.getDate();
+          for (day = todaysDay, _ref = todaysDay - 7; todaysDay <= _ref ? day < _ref : day > _ref; todaysDay <= _ref ? day++ : day--) {
+            date = new Date(today.getFullYear(), today.getMonth(), day);
+            if (buddy.hasHistoricData(date)) {
+              el.append("<a rel=\"" + (date.getTime()) + "\">Listen songs from " + (date.toDateString()) + "</a><br />");
+            } else {
+              el.append("No songs played " + (date.toDateString()) + "<br />");
+            }
+          }
+          $("#buddyradio_more button.fetchlastweek").remove();
+          return $("#buddyradio_more .lastweekdata a").click(__bind(function(event) {
+            var from, to;
+            $("#buddyradio_more").remove();
+            from = new Date(parseInt($(event.currentTarget).attr("rel")));
+            to = new Date(from.getFullYear(), from.getMonth(), from.getDate(), 23, 59, 59);
+            return this.controller.tuneHistoric(networkClassName, username, from, to);
+          }, this));
+        }, this));
+      }
+    };
+    return GroovesharkV2;
   })();
   Controller = {};
   Controller.Radio = (function() {

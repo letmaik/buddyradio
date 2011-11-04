@@ -4,7 +4,7 @@
 
 exports.start = () ->
 	controller = new Controller.Radio([new Model.LastFmBuddyNetwork], [new Model.GroovesharkStreamingNetwork])
-	new View.BuddySidebarSection(controller)
+	new View.Grooveshark(controller)
 	controller.start()
 	
 exports.classes = () ->

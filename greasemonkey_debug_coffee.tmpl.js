@@ -2,6 +2,7 @@
 // @name          BuddyRadio Debug
 // @namespace     http://github.com/neothemachine/
 // @include       http://grooveshark.com/*
+// @include       http://preview.grooveshark.com/*
 // ==/UserScript==
 
 (function ()
