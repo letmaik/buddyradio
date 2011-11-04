@@ -20,10 +20,8 @@
     h1 .small { font-size: 0.4em; }
     h1 a { text-decoration: none }
     h2 { font-size: 1.5em; color: #121212; }
-    h3 { text-align: center; color: #121212; }
     a { color: #121212; }
     .description { font-size: 1.2em; margin-bottom: 30px; margin-top: 30px; font-style: italic;}
-    .download { float: right; }
     pre { background: #000; color: #fff; padding: 15px;}
     hr { border: 0; width: 80%; border-bottom: 1px solid #aaa}
     .footer { text-align:center; padding-top:30px; font-style: italic; }
@@ -35,57 +33,125 @@
 
   <div id="container">
 
-    <div class="download">
-      <a href="https://github.com/neothemachine/buddyradio/zipball/master">
-        <img border="0" width="90" src="https://github.com/images/modules/download/zip.png"></a>
-      <a href="https://github.com/neothemachine/buddyradio/tarball/master">
-        <img border="0" width="90" src="https://github.com/images/modules/download/tar.png"></a>
-    </div>
-
     <h1><a href="https://github.com/neothemachine/buddyradio">BuddyRadio</a>
       <span class="small">by <a href="https://github.com/neothemachine">neothemachine</a></span></h1>
 
     <div class="description">
-      
+      Want to discover some new music? Just tune into your friend's music! Live!
     </div>
+	
+	<table style="width: 100%;">
+		<tr style="vertical-align: middle;">
+			<td style="text-align: center;">
+				<img src="screenshot_main.png" alt="Screenshot 1" /> 
+			</td>
+			<td style="text-align: center;">
+				<img src="screenshot_more_menu.png" alt="Screenshot 2" />
+			</td>
+		</tr>
+	</table>
 
-    
+	<h2>What it does</h2>
+	<p>
+		BuddyRadio is an extension to <a href="http://grooveshark.com">Grooveshark</a> and adds
+		a new sidebar section on the left side of it. There you can add your friends (or other users) from 
+		<a href="http://last.fm">Last.fm</a> and see when they are listening to music. If they are,
+		you can tune into their live listening stream by clicking their user name. You can also 
+		tune into the past, that is choose some day of last week and play the music your friends
+		listened to at that day.
+	</p>
 
-    
-
-    
-
-    
-
-    
-
-    
-
-    <h2>Download</h2>
-    <p>
-      You can download this project in either
-      <a href="https://github.com/neothemachine/buddyradio/zipball/master">zip</a> or
-      <a href="https://github.com/neothemachine/buddyradio/tarball/master">tar formats.
-    </p>
-    <p>You can also clone the project with <a href="http://git-scm.com">Git</a>
-      by running:
-      <pre>$ git clone git://github.com/neothemachine/buddyradio</pre>
-    </p>
-
+	<h2>Download</h2>
+	
+    <h3>Greasemonkey</h3>
+	<p>
+		If you want to use BuddyRadio each time you visit <a href="http://grooveshark.com">Grooveshark</a>
+		then you should install it as a 
+		<a href="https://addons.mozilla.org/de/firefox/addon/greasemonkey/">Greasemonkey</a> Script.
+	</p>
+	<p>
+		<a href="http://userscripts.org/scripts/show/XXXX.user.js">Download Greasemonkey Script</a> (tested on Mozilla Firefox)
+	</p>
+	
+	<h3>Bookmarklet</h3>
+	<p>
+		If you want to test BuddyRadio first or just use it occassionally, it might be better to
+		use the Bookmarklet version which also runs in every browser.
+	</p>
+	<p>
+		<a href="javascript:(function(){var s=document.createElement('script');s.type='text/javascript';s.src='http://code.onilabs.com/apollo/0.13/oni-apollo.js';s.addEventListener('load',loadBuddyRadioModuleOnDelay,false);document.body.appendChild(s);function loadBuddyRadioModuleOnDelay(){setTimeout(loadBuddyRadioModule,666)}function loadBuddyRadioModule(){require('github:neothemachine/buddyradio/master/dist/buddyradio',{callback:loadBuddyRadio})}function loadBuddyRadio(err,a){if(err){throw ('error: '+err)}a.start()};}())">
+			Drag me
+		</a> to your bookmarks and click once while on Grooveshark.com. That's all!
+	</p>
+	
+	<h2>FaQ</h2>
+	<h3>Where can I submit issues and suggest new features?</h3>
+	<p>
+		Please jump over to the <a href="">BuddyRadio userscripts.org site</a>. There you can discuss,
+		submit issues, write reviews and even become a fan ;-)
+	</p>
+	<h3>Do I need to re-download the scripts to get updates?</h3>
+	<p>
+		No! The script you download is just a very small one (like a boot loader) which loads
+		its main application from a dedicated server each time you run BuddyRadio. Therefore
+		you automatically always use the latest available version and don't have to worry about it.
+	</p>
+	<h3>Why are my settings and users not there anymore?</h3>
+	<p>
+		BuddyRadio uses the <a href="http://dev.w3.org/html5/webstorage/">local storage</a>
+		of your web browser and doesn't save anything on remote servers. Therefore, if you
+		use another device or reinstall your browser, that data will be lost. To make a fresh start
+		easier, BuddyRadio has a built-in function to load all your Last.fm friends at once. (click "+")
+	</p>
+	<h3>Why does the music sometimes stop for some seconds on a song change?</h3>
+	<p>
+		Sometimes when BuddyRadio tries to add a new song to Grooveshark's playlist, it doesn't work.
+		With the limited <a href="http://developers.grooveshark.com/docs/js_api/">Javascript API</a>
+		(see question below) there is no way to detect whether this has happened (before the song ends).
+		If it could be detected (by having access to the whole playlist queue) BuddyRadio could
+		immediately try again to add the new song to the playlist. So instead, what happens is, the current song
+		ends and BuddyRadio can now detect that there should be something new playing now, but in fact there isn't.
+		Then, it can try to add the song again one more time. That's why there is a slight delay in some cases.
+	</p>
+	<h3>What the hell is http://buddyradioproxy.appspot.com??</h3>
+	<p>
+		If you look at the source code or observe your web traffic you will see requests to
+		http://buddyradioproxy.appspot.com/tinysong. This is a simple wrapper to the 
+		<a href="http://tinysong.com/api">Tinysong API</a> I had to create as it's not allowed to
+		publish your personal Tinysong API key (e.g. as part of the source code of BuddyRadio).
+		Tinysong is owned by Grooveshark and is used in BuddyRadio to find songs in Grooveshark. This is
+		needed because Grooveshark's <a href="http://developers.grooveshark.com/docs/js_api/">Javascript API</a> 
+		doesn't support any searching.
+	</p>
+	<h3>Why wasn't BuddyRadio developed as an extension to Last.fm?</h3>
+	<p>
+		First, Last.fm doesn't allow to stream music using their public API. Second, many songs on
+		Last.fm are only available as a 30 sec version or not at all, particularly newer releases.
+		Grooveshark on the other hand lets users upload any of their music and operates under the
+		<a href="http://en.wikipedia.org/wiki/Digital_Millennium_Copyright_Act">DMCA</a> like YouTube.
+		So, you might ask, why not fetch songs from Grooveshark and somehow play them inside Last.fm?
+		That's not possible either as Grooveshark isn't granting streaming API access to some small
+		developer. What they do is provide <a href="http://developers.grooveshark.com/docs/js_api/">Javascript API</a>
+		access while you're on their website. The BuddyRadio code base has been kept quite modular so that if
+		any of the APIs change or even a different streaming site should be used, the effort should
+		be quite low.
+		
+	</p>
+	
     <div class="footer">
       get the source code on GitHub : <a href="https://github.com/neothemachine/buddyradio">neothemachine/buddyradio</a>
     </div>
 
   </div>
 
-<script type=\"text/javascript\">
+<script type="text/javascript">
 var gaJsHost = ((\"https:\" == document.location.protocol) ? \"https://ssl.\" : \"http://www.\");
 document.write(unescape(\"%3Cscript src='\" + gaJsHost + \"google-analytics.com/ga.js' type='text/javascript'%3E%3C/script%3E\"));
 </script>
-<script type=\"text/javascript\">
+<script type="text/javascript">
 try {
 var pageTracker = _gat._getTracker("UA-598965-2");
 pageTracker._trackPageview();
-} catch(err) {}</script>"
+} catch(err) {}</script>
 </body>
 </html>
