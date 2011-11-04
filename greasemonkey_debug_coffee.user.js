@@ -788,7 +788,8 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 		# sometimes grooveshark doesn't add and play a song when calling addSongsByID()
 		# this leaves our queue in an inconsistent state so we have to clean it up now and then
 		if @queuedSongResources.length > 0 and
-		   @queuedSongResources[0].length == null # null length is taken as an indicator that the song was never played
+		   @queuedSongResources[0].length == null and # null length is taken as an indicator that the song was never played
+		   @currentSongShouldHaveStartedAt?
 			if (Date.now() - @currentSongShouldHaveStartedAt) > 10000
 				console.warn("grooveshark got stuck... trying to re-add current song")
 				resource = @queuedSongResources.shift()
@@ -834,9 +835,12 @@ class Model.GroovesharkStreamingNetwork extends Model.StreamingNetwork
 				console.debug("song length set to #{resource.length} ms (songId #{song.songID})")
 		
 		# check if song was skipped
+		console.log(@queuedSongResources)
+		console.log(song.songID)
 		while @queuedSongResources[0].songId != song.songID
 			resource = @queuedSongResources.shift()
 			listener("streamingSkipped", resource) for listener in @eventListeners
+			@currentSongShouldHaveStartedAt = Date.now()
 		
 		# check if current song finished playing or failed to play
 		if ["completed", "failed"].indexOf(status) != -1

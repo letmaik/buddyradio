@@ -1097,7 +1097,7 @@
     };
     GroovesharkStreamingNetwork.prototype._cleanup = function() {
       var listener, oldDate, resource, _i, _len, _ref, _ref2, _results;
-      if (this.queuedSongResources.length > 0 && this.queuedSongResources[0].length === null) {
+      if (this.queuedSongResources.length > 0 && this.queuedSongResources[0].length === null && (this.currentSongShouldHaveStartedAt != null)) {
         if ((Date.now() - this.currentSongShouldHaveStartedAt) > 10000) {
           console.warn("grooveshark got stuck... trying to re-add current song");
           resource = this.queuedSongResources.shift();
@@ -1157,6 +1157,8 @@
           console.debug("song length set to " + resource.length + " ms (songId " + song.songID + ")");
         }
       }
+      console.log(this.queuedSongResources);
+      console.log(song.songID);
       while (this.queuedSongResources[0].songId !== song.songID) {
         resource = this.queuedSongResources.shift();
         _ref = this.eventListeners;
@@ -1164,6 +1166,7 @@
           listener = _ref[_i];
           listener("streamingSkipped", resource);
         }
+        this.currentSongShouldHaveStartedAt = Date.now();
       }
       if (["completed", "failed"].indexOf(status) !== -1) {
         if (this.queuedSongResources.length > 0) {
