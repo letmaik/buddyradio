@@ -25,6 +25,11 @@
     pre { background: #000; color: #fff; padding: 15px;}
     hr { border: 0; width: 80%; border-bottom: 1px solid #aaa}
     .footer { text-align:center; padding-top:30px; font-style: italic; }
+	
+	.browser_support { border-spacing:0; }
+	.browser_support td { padding: 4px; border-top: 1px solid black; border-right: 1px solid black; text-align: center }
+	.browser_support th { padding: 4px; border-right: 1px solid black }
+	.browser_support td:last-child, .browser_support th:last-child { border-right: 0}
   </style>
 </head>
 
@@ -40,12 +45,12 @@
       Want to discover some new music? Just tune into your friend's music! Live!
     </div>
 	
-	<table style="width: 100%;">
-		<tr style="vertical-align: middle;">
-			<td style="text-align: center;">
+	<table style="width: 100%">
+		<tr style="vertical-align: middle">
+			<td style="text-align: center">
 				<img src="screenshot_main.png" alt="Screenshot 1" /> 
 			</td>
-			<td style="text-align: center;">
+			<td style="text-align: center">
 				<img src="screenshot_more_menu.png" alt="Screenshot 2" />
 			</td>
 		</tr>
@@ -62,6 +67,33 @@
 	</p>
 
 	<h2>Download</h2>
+	
+	<h3>Browser Support</h3>
+	<table class="browser_support">
+		<thead>
+			<tr>
+				<th></th>
+				<th>Mozilla Firefox</th>
+				<th>Google Chrome</th>
+				<th>Opera</th>
+				<th>Internet Explorer</th>
+			</tr>
+		</thead>
+		<tr>
+			<td>Greasemonkey</td>
+			<td>X</td>
+			<td>(soon)</td>
+			<td>(soon)</td>
+			<td>-</td>
+		</tr>
+		<tr>
+			<td>Bookmarklet</td>
+			<td>X</td>
+			<td>X</td>
+			<td>(soon)</td>
+			<td>(soon)</td>
+		</tr>
+	</table>
 	
     <h3>Greasemonkey</h3>
 	<p>
