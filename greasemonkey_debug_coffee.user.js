@@ -1406,7 +1406,7 @@ class View.GroovesharkV1
 				
 			position = newButton.offset()
 			$("body").append("""
-			<div id="buddyradio_newuserform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: 255px; height: 80px;" class="jjmenu">
+			<div id="buddyradio_newuserform" style="position: absolute; top: #{position.top}px; left: #{position.left+20}px; display: block;width: auto; height: 80px;" class="jjmenu">
 				<div class="jj_menu_item">
 					<div style="width: 100px;float:left" class="input_wrapper">
 						<div class="cap">
@@ -1802,7 +1802,7 @@ class View.GroovesharkV2
 				
 			position = newButton.offset()
 			$("body").append("""
-			<div id="buddyradio_newuserform" style="position: absolute; top: #{position.top+20}px; left: #{position.left+20}px; display: block;width: 260px; height: 80px;" class="jjmenu">
+			<div id="buddyradio_newuserform" style="position: absolute; top: #{position.top+20}px; left: #{position.left+20}px; display: block;width: auto; height: 80px;" class="jjmenu">
 				<div class="jj_menu_item">
 					<div style="width: 100px;float:left" class="input_wrapper">
 						<div class="cap">
