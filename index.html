@@ -31,9 +31,19 @@
 	.browser_support th { padding: 4px; border-right: 1px solid black }
 	.browser_support td:last-child, .browser_support th:last-child { border-right: 0}
   </style>
+  
 </head>
 
 <body>
+	<div id="fb-root"></div>
+	<script>(function(d, s, id) {
+	  var js, fjs = d.getElementsByTagName(s)[0];
+	  if (d.getElementById(id)) {return;}
+	  js = d.createElement(s); js.id = id;
+	  js.src = "http://connect.facebook.net/de_DE/all.js#xfbml=1";
+	  fjs.parentNode.insertBefore(js, fjs);
+	}(document, 'script', 'facebook-jssdk'));</script>
+	
   <a href="https://github.com/neothemachine/buddyradio"><img style="position: absolute; top: 0; right: 0; border: 0;" src="http://s3.amazonaws.com/github/ribbons/forkme_right_darkblue_121621.png" alt="Fork me on GitHub" /></a>
 
   <div id="container">
@@ -41,6 +51,10 @@
     <h1><a href="https://github.com/neothemachine/buddyradio">BuddyRadio</a>
       <span class="small">by <a href="https://github.com/neothemachine">neothemachine</a></span></h1>
 
+	<div class="fb-like" data-href="http://neothemachine.github.com/buddyradio/" data-layout="button_count" data-width="150" data-show-faces="false"></div>
+	<a href="https://twitter.com/share" class="twitter-share-button" data-text="BuddyRadio - Live user radio for Last.fm with Grooveshark!" data-count="horizontal">Tweet</a>
+	<g:plusone></g:plusone>
+	  
     <div class="description">
       Want to discover some new music? Just tune into your friend's music! Live!
     </div>
@@ -255,13 +269,19 @@
   </div>
 
 <script type="text/javascript">
-var gaJsHost = ((\"https:\" == document.location.protocol) ? \"https://ssl.\" : \"http://www.\");
-document.write(unescape(\"%3Cscript src='\" + gaJsHost + \"google-analytics.com/ga.js' type='text/javascript'%3E%3C/script%3E\"));
+
+  var _gaq = _gaq || [];
+  _gaq.push(['_setAccount', 'UA-598965-2']);
+  _gaq.push(['_trackPageview']);
+
+  (function() {
+    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+  })();
+
 </script>
-<script type="text/javascript">
-try {
-var pageTracker = _gat._getTracker("UA-598965-2");
-pageTracker._trackPageview();
-} catch(err) {}</script>
+<script type="text/javascript" src="http://platform.twitter.com/widgets.js"></script>
+<script type="text/javascript" src="https://apis.google.com/js/plusone.js"></script>
 </body>
 </html>
