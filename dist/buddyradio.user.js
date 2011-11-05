@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          BuddyRadio Loader
 // @namespace     http://github.com/neothemachine/
-// @version       0.1
+// @version       0.2
 // @description   Extends Grooveshark and lets you see and hear what your Last.fm friends listen to.
 // @author        Maik Riechert
 // @include       http://grooveshark.com/*
