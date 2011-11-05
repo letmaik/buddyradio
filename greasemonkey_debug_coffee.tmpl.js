@@ -5,8 +5,7 @@
 // @include       http://preview.grooveshark.com/*
 // ==/UserScript==
 
-(function ()
-{
+var loader = function () {
 	if (window.top != window.self)  // don't run on iframes
 		return;
 		
@@ -21,7 +20,7 @@
 	}
 
 	function loadCoffee() {
-		unsafeWindow.require("github:onilabs/coffee-script/master/extras/coffee-script.js", {callback: coffeeLoaded});
+		window.require("github:onilabs/coffee-script/master/extras/coffee-script.js", {callback: coffeeLoaded});
 	}
 
 	function coffeeLoaded(err, module) {
@@ -31,15 +30,19 @@
 	#COFFEE#
 		]]></>).toString();
 		
-		unsafeWindow.CScript = module.CoffeeScript;
-		unsafeWindow.CS = debugMultiLineHack;
+		window.CScript = module.CoffeeScript;
+		window.CS = debugMultiLineHack;
 		var sjsSrc = module.CoffeeScript.compile(debugMultiLineHack);
-		unsafeWindow.SJS = sjsSrc;
-		unsafeWindow.require("local:buddyradio", {callback: radioLoaded, src: sjsSrc});
+		window.SJS = sjsSrc;
+		window.require("local:buddyradio", {callback: radioLoaded, src: sjsSrc});
 	}
 
 	function radioLoaded(err, module) {
 		if (err) alert(err); //throw new Error('error: ' + err);
 		module.start();
 	}
-})();
+};
+
+var script = document.createElement('script');
+script.textContent = '(' + loader + ')();';
+document.body.appendChild(script);

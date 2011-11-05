@@ -14,8 +14,7 @@ Licensed under the GNU General Public License v3
 License available at http://www.gnu.org/licenses/gpl-3.0.html
 */
 
-(function ()
-{
+var loader = function () {
 	if (window.top != window.self)  // don't run on iframes
 		return;
 
@@ -30,12 +29,15 @@ License available at http://www.gnu.org/licenses/gpl-3.0.html
 	}
 
 	function loadBuddyRadioModule() {
-		var _window = typeof unsafeWindow !== "undefined" && unsafeWindow !== null ? unsafeWindow : window;
-		_window.require("github:neothemachine/buddyradio/master/dist/buddyradio", {callback: loadBuddyRadio});
+		window.require("github:neothemachine/buddyradio/master/dist/buddyradio", {callback: loadBuddyRadio});
 	}
 
 	function loadBuddyRadio(err, module) {
 		if (err) throw ('error: ' + err);
 		module.start();
 	}
-})();
+};
+
+var script = document.createElement('script');
+script.textContent = '(' + loader + ')();';
+document.body.appendChild(script);
