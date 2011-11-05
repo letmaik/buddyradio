@@ -1342,7 +1342,7 @@ class View.GroovesharkV1
 			.sidebar_buddy a:hover .label {
 				margin-right: 20px;
 			}
-			.sidebar_buddy a:hover .icon.remove {
+			.sidebar_buddy a:hover .icon.remove, .sidebar_buddy a:hover .icon.remove:hover {
 				background-position: -16px -16px !important;
 				display: block;
 			}
@@ -1352,7 +1352,7 @@ class View.GroovesharkV1
 			.sidebar_buddy a:active .label {
 				color: #FFFFFF !important;
 			}
-			.sidebar_buddy a:active .icon.remove {
+			.sidebar_buddy a:active .icon.remove, .sidebar_buddy a:active .icon.remove:hover {
 				background-position: -32px -16px !important;
 				display: block;
 			}
