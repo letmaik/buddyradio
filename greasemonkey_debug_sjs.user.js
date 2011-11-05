@@ -22,7 +22,7 @@ var loader = function () {
 	function loadRadio() {	
 		var debugMultiLineHack = (<><![CDATA[
 	(function() {
-  var Controller, EOVR, LastFmApi, Model, View, http;
+  var Controller, EOVR, LastFmApi, Model, View, console, http;
   var __bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; }, __hasProp = Object.prototype.hasOwnProperty, __extends = function(child, parent) {
     for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; }
     function ctor() { this.constructor = child; }
@@ -31,6 +31,12 @@ var loader = function () {
     child.__super__ = parent.prototype;
     return child;
   }, __slice = Array.prototype.slice;
+  if (typeof console === "undefined" || console === null) console = {};
+  if (console.debug == null) console.debug = (function() {});
+  if (console.log == null) console.log = (function() {});
+  if (console.info == null) console.info = (function() {});
+  if (console.warn == null) console.warn = (function() {});
+  if (console.error == null) console.error = (function() {});
   exports.start = function() {
     var controller;
     controller = new Controller.Radio([new Model.LastFmBuddyNetwork], [new Model.GroovesharkStreamingNetwork]);
