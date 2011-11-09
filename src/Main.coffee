@@ -2,7 +2,7 @@
 # Licensed under the GNU General Public License v3
 # License available at http://www.gnu.org/licenses/gpl-3.0.html
 
-console = {} unless console?
+window.console = {} unless window.console?
 console.debug = (->) unless console.debug?
 console.log = (->) unless console.log?
 console.info = (->) unless console.info?

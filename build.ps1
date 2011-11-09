@@ -37,8 +37,6 @@ $tmpl_sjs = $tmpl_sjs -replace "#SJS#", $sjs
 $tmpl_sjs | Out-File "greasemonkey_debug_sjs.user.js" -Encoding ASCII
 
 # run jasmin tests
-#$env:NODE_PATH = Join-Path $pwd "dist"
-#$env:NODE_PATH = Join-Path $pwd "lib\jasmine-node"
 apollo lib/jasmine-node/cli.sjs --coffee --verbose ./spec
 if ($LastExitCode -ne 0) {
 	Read-Host "press any key to exit..."
