@@ -54,6 +54,7 @@ class Model.Radio
 		feed.registerListener((name, data) =>
 			if name == "endOfFeed"
 				username = @_getUsernameByFeed(data)
+				console.debug("endOfFeed received for #{username}")
 				# FIXME hacky
 				buddy = @buddyManager.buddies.filter((buddy) -> buddy.username == username)[0]
 				@tuneOut(buddy, "endOfFeed")

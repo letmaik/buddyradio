@@ -56,6 +56,12 @@ class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 		@_moveToNextFeed()
 		startIdx = @_currentFeedIdx
 		while not @feeds[@_currentFeedIdx].hasNext()
+			# the following check is necessary because feeds could've been removed
+			# after calling feed.hasNext() in the while condition due to an "endOfFeed" event
+			# a better way would be to introduce some kind of event queue
+			if @feeds.length == 0
+				return false
+				
 			@_moveToNextFeed()
 			if @_currentFeedIdx == startIdx
 				return false

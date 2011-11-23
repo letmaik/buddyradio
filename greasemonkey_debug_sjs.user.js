@@ -384,6 +384,7 @@ var loader = function () {
         var username;
         if (name === "endOfFeed") {
           username = this._getUsernameByFeed(data);
+          console.debug("endOfFeed received for " + username);
           buddy = this.buddyManager.buddies.filter(function(buddy) {
             return buddy.username === username;
           })[0];
@@ -667,6 +668,7 @@ var loader = function () {
       this._moveToNextFeed();
       startIdx = this._currentFeedIdx;
       while (!this.feeds[this._currentFeedIdx].hasNext()) {
+        if (this.feeds.length === 0) return false;
         this._moveToNextFeed();
         if (this._currentFeedIdx === startIdx) return false;
       }
