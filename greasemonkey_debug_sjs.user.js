@@ -1961,7 +1961,7 @@ var loader = function () {
     GroovesharkV2.prototype._applyStyle = function(buddy) {
       var classes, el;
       if (!(buddy != null)) return;
-      el = $("a.sidebar_buddy[rel='" + buddy.network.className + "-" + buddy.username + "']");
+      el = $("a.sidebar_buddy[rel='" + buddy.network.className + ":" + buddy.username + "']");
       el.removeClass("buddy_nowplaying buddy_feedenabled buddy_feedenabled_historic buddy_live buddy_off buddy_disabled");
       classes = "buddy_" + buddy.listeningStatus;
       if (this.radio.isFeedEnabled(buddy)) {
@@ -2077,7 +2077,7 @@ var loader = function () {
             status += ", last listened to: " + song;
           }
         }
-        $("#sidebar_buddyradio .buddyradio_users").append("<a rel=\"" + buddy.network.className + "-" + buddy.username + "\" class=\"sidebar_buddy buddy sidebar_link\">\n	<span class=\"icon remove\"></span>\n	<span class=\"icon more\"></span>\n	<span class=\"label ellipsis\" title=\"" + buddy.username + " (" + buddy.network.name + ") - " + status + "\">" + buddy.username + "</span>\n</a>");
+        $("#sidebar_buddyradio .buddyradio_users").append("<a rel=\"" + buddy.network.className + ":" + buddy.username + "\" class=\"sidebar_buddy buddy sidebar_link\">\n	<span class=\"icon remove\"></span>\n	<span class=\"icon more\"></span>\n	<span class=\"label ellipsis\" title=\"" + buddy.username + " (" + buddy.network.name + ") - " + status + "\">" + buddy.username + "</span>\n</a>");
         this._applyStyle(buddy);
       }
       $("a.sidebar_buddy .more").click(__bind(function(event) {
@@ -2085,20 +2085,20 @@ var loader = function () {
         event.preventDefault();
         event.stopPropagation();
         entry = $(event.currentTarget).parent();
-        _ref = entry.attr("rel").split("-"), networkClassName = _ref[0], username = _ref[1];
+        _ref = entry.attr("rel").split(":"), networkClassName = _ref[0], username = _ref[1];
         return this._showMoreMenu(networkClassName, username);
       }, this));
       $("a.sidebar_buddy .remove").click(__bind(function(event) {
         var networkClassName, username, _ref;
         event.preventDefault();
         event.stopPropagation();
-        _ref = $(event.currentTarget).parent().attr("rel").split("-"), networkClassName = _ref[0], username = _ref[1];
+        _ref = $(event.currentTarget).parent().attr("rel").split(":"), networkClassName = _ref[0], username = _ref[1];
         return this.controller.removeBuddy(networkClassName, username);
       }, this));
       return $("a.sidebar_buddy").click(__bind(function(event) {
         var networkClassName, username, _ref;
         event.preventDefault();
-        _ref = $(event.currentTarget).attr("rel").split("-"), networkClassName = _ref[0], username = _ref[1];
+        _ref = $(event.currentTarget).attr("rel").split(":"), networkClassName = _ref[0], username = _ref[1];
         return this.controller.tune(networkClassName, username);
       }, this));
     };
@@ -2114,7 +2114,7 @@ var loader = function () {
         }
       }
       this._currentlyOpenedMenu = buddy;
-      position = $("a.sidebar_buddy[rel='" + networkClassName + "-" + username + "'] .more").offset();
+      position = $("a.sidebar_buddy[rel='" + networkClassName + ":" + username + "'] .more").offset();
       if (!(position != null)) return;
       feedInfo = "";
       if (this.radio.isFeedEnabled(buddy)) {

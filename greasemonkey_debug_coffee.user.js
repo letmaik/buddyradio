@@ -51,6 +51,46 @@ LastFmApi = require("apollo:lastfm")
 LastFmApi.key = "53cda3b9d8760dbded7b4ca420b5abb2"
 
 EOVR = new Error("must be overriden")
+
+# TODO new ideas...
+# 0. alert if script is executed twice (e.g. Loader and debug version)
+# 1. ability to import last.fm neighbors, see 2.
+# 2. new optional setting: last.fm authorization (thus don't allow to use someone else's username)
+#    -> new options "show friends" and "show neighbors" -> don't save them, but reload them everytime
+#    -> new sections necessary to separate between friends, neighbors and custom added users
+#	 -> individual user-add still possible
+# 2.1 permissions
+#    -> allow historic radio (except today) for every user
+#    -> allow today's historic radio only for (last.fm) friends
+#    -> allow live radio only for (last.fm) friends
+#      -> more ideal would actually be a last.fm setting to control who can see the last listened
+#         tracks and also seperate it from historic data
+#      -> this is partly a simulation for it
+# 3. wizard if first-time use (=no settings saved)
+# 4. user overlay with useful information
+#    - last x songs played by user (vert. scrollbar) + currently playing song (if live)
+#    - if tuned in: last songs played + queued songs (historic mode: all upcoming songs!)
+# 5. preview of songs before going into historic mode
+#    - preview of first 10 songs, but with "more" and "all" option to display more/all songs
+# it's probably best to have a single overlay with all relevant information
+# 6. overlay for BuddyRadio heading with global information
+#    - last songs played + user
+#    - stats (x friends/neighbors live/off)
+# 7. rename main application to "BuddyRadio Core" and add explanation to reduce confusion
+#    BuddyRadio = BuddyRadio Loader + BuddyRadio Core
+# 8. update notification for BuddyRadio Core
+#    - store version in localStorage
+#      -> if version stored and stored version < used version, then display notification with changelog
+#      "You are now using BuddyRadio Core 0.x. Changelog: "
+# 9. update notification for BuddyRadio Loader
+#    - store version of loader in loader code and store current version of loader in core code
+#    - if the loader version stored in core is bigger than the used loader, display notification
+#      "Please update the BuddyRadio Loader to be able to use future versions of BuddyRadio"
+# 10. fresh design for website with new features 
+#    - subpages
+#    - add direct contact info
+#    - add fact that a Grooveshark account isn't needed
+#    - some seo
 # Copyright (c) 2011 Maik Riechert
 # Licensed under the GNU General Public License v3
 # License available at http://www.gnu.org/licenses/gpl-3.0.html
@@ -287,6 +327,7 @@ class Model.Radio
 		feed.registerListener((name, data) =>
 			if name == "endOfFeed"
 				username = @_getUsernameByFeed(data)
+				console.debug("endOfFeed received for #{username}")
 				# FIXME hacky
 				buddy = @buddyManager.buddies.filter((buddy) -> buddy.username == username)[0]
 				@tuneOut(buddy, "endOfFeed")
@@ -488,6 +529,12 @@ class Model.AlternatingSongFeedCombinator extends Model.SongFeed
 		@_moveToNextFeed()
 		startIdx = @_currentFeedIdx
 		while not @feeds[@_currentFeedIdx].hasNext()
+			# the following check is necessary because feeds could've been removed
+			# after calling feed.hasNext() in the while condition due to an "endOfFeed" event
+			# a better way would be to introduce some kind of event queue
+			if @feeds.length == 0
+				return false
+				
 			@_moveToNextFeed()
 			if @_currentFeedIdx == startIdx
 				return false
@@ -1700,7 +1747,7 @@ class View.GroovesharkV2
 	_applyStyle: (buddy) ->
 		if not buddy?
 			return
-		el = $("a.sidebar_buddy[rel='#{buddy.network.className}-#{buddy.username}']")
+		el = $("a.sidebar_buddy[rel='#{buddy.network.className}:#{buddy.username}']")
 		el.removeClass("buddy_nowplaying buddy_feedenabled buddy_feedenabled_historic buddy_live buddy_off buddy_disabled")
 		classes = "buddy_#{buddy.listeningStatus}"
 		if @radio.isFeedEnabled(buddy)
@@ -1937,7 +1984,7 @@ class View.GroovesharkV2
 				else if status == "OFF" and buddy.lastSong?
 					status += ", last listened to: #{song}"
 			$("#sidebar_buddyradio .buddyradio_users").append("""
-				<a rel="#{buddy.network.className}-#{buddy.username}" class="sidebar_buddy buddy sidebar_link">
+				<a rel="#{buddy.network.className}:#{buddy.username}" class="sidebar_buddy buddy sidebar_link">
 					<span class="icon remove"></span>
 					<span class="icon more"></span>
 					<span class="label ellipsis" title="#{buddy.username} (#{buddy.network.name}) - #{status}">#{buddy.username}</span>
@@ -1950,18 +1997,18 @@ class View.GroovesharkV2
 			event.preventDefault()
 			event.stopPropagation()
 			entry = $(event.currentTarget).parent()
-			[networkClassName, username] = entry.attr("rel").split("-")
+			[networkClassName, username] = entry.attr("rel").split(":")
 			@_showMoreMenu(networkClassName, username)
 		)
 		$("a.sidebar_buddy .remove").click((event) =>
 			event.preventDefault()
 			event.stopPropagation()
-			[networkClassName, username] = $(event.currentTarget).parent().attr("rel").split("-")
+			[networkClassName, username] = $(event.currentTarget).parent().attr("rel").split(":")
 			@controller.removeBuddy(networkClassName, username)
 		)
 		$("a.sidebar_buddy").click((event) =>
 			event.preventDefault()
-			[networkClassName, username] = $(event.currentTarget).attr("rel").split("-")
+			[networkClassName, username] = $(event.currentTarget).attr("rel").split(":")
 			@controller.tune(networkClassName, username)
 		)
 	
@@ -1975,7 +2022,7 @@ class View.GroovesharkV2
 				@_currentlyOpenedMenu = null
 				return
 		@_currentlyOpenedMenu = buddy
-		position = $("a.sidebar_buddy[rel='#{networkClassName}-#{username}'] .more").offset()
+		position = $("a.sidebar_buddy[rel='#{networkClassName}:#{username}'] .more").offset()
 		if not position?
 			return
 		

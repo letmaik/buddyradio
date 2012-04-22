@@ -46,7 +46,7 @@ class View.GroovesharkV2
 	_applyStyle: (buddy) ->
 		if not buddy?
 			return
-		el = $("a.sidebar_buddy[rel='#{buddy.network.className}-#{buddy.username}']")
+		el = $("a.sidebar_buddy[rel='#{buddy.network.className}:#{buddy.username}']")
 		el.removeClass("buddy_nowplaying buddy_feedenabled buddy_feedenabled_historic buddy_live buddy_off buddy_disabled")
 		classes = "buddy_#{buddy.listeningStatus}"
 		if @radio.isFeedEnabled(buddy)
@@ -238,7 +238,7 @@ class View.GroovesharkV2
 					</button>					
 				</div>
 				<div style="margin-top:10px; float:right; text-align:right">
-					BuddyRadio v0.3<br />
+					BuddyRadio v0.3.1<br />
 					<a href="http://neothemachine.github.com/buddyradio" target="_blank">Project Page</a>
 				</div>
 			</div>
@@ -283,7 +283,7 @@ class View.GroovesharkV2
 				else if status == "OFF" and buddy.lastSong?
 					status += ", last listened to: #{song}"
 			$("#sidebar_buddyradio .buddyradio_users").append("""
-				<a rel="#{buddy.network.className}-#{buddy.username}" class="sidebar_buddy buddy sidebar_link">
+				<a rel="#{buddy.network.className}:#{buddy.username}" class="sidebar_buddy buddy sidebar_link">
 					<span class="icon remove"></span>
 					<span class="icon more"></span>
 					<span class="label ellipsis" title="#{buddy.username} (#{buddy.network.name}) - #{status}">#{buddy.username}</span>
@@ -296,18 +296,18 @@ class View.GroovesharkV2
 			event.preventDefault()
 			event.stopPropagation()
 			entry = $(event.currentTarget).parent()
-			[networkClassName, username] = entry.attr("rel").split("-")
+			[networkClassName, username] = entry.attr("rel").split(":")
 			@_showMoreMenu(networkClassName, username)
 		)
 		$("a.sidebar_buddy .remove").click((event) =>
 			event.preventDefault()
 			event.stopPropagation()
-			[networkClassName, username] = $(event.currentTarget).parent().attr("rel").split("-")
+			[networkClassName, username] = $(event.currentTarget).parent().attr("rel").split(":")
 			@controller.removeBuddy(networkClassName, username)
 		)
 		$("a.sidebar_buddy").click((event) =>
 			event.preventDefault()
-			[networkClassName, username] = $(event.currentTarget).attr("rel").split("-")
+			[networkClassName, username] = $(event.currentTarget).attr("rel").split(":")
 			@controller.tune(networkClassName, username)
 		)
 	
@@ -321,7 +321,7 @@ class View.GroovesharkV2
 				@_currentlyOpenedMenu = null
 				return
 		@_currentlyOpenedMenu = buddy
-		position = $("a.sidebar_buddy[rel='#{networkClassName}-#{username}'] .more").offset()
+		position = $("a.sidebar_buddy[rel='#{networkClassName}:#{username}'] .more").offset()
 		if not position?
 			return
 		
