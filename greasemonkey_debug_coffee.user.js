@@ -1939,7 +1939,7 @@ class View.GroovesharkV2
 					</button>					
 				</div>
 				<div style="margin-top:10px; float:right; text-align:right">
-					BuddyRadio v0.3<br />
+					BuddyRadio v0.3.1<br />
 					<a href="http://neothemachine.github.com/buddyradio" target="_blank">Project Page</a>
 				</div>
 			</div>
